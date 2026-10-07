@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: user-profile-service
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/profile
+    username: ${DB_USER:profile}
+    password: ${DB_PASSWORD:profile}
+    pool:
+      max-size: 10
+  flyway:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/profile
+    user: ${DB_USER:profile}
+    password: ${DB_PASSWORD:profile}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Keycloak realm (configured in Phase 4). Both set: keys are fetched lazily from the
+          # JWK set, and tokens must carry this exact issuer. No discovery call at startup.
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/train-booking}
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8180/realms/train-booking/protocol/openid-connect/certs}
+
+server:
+  port: ${PORT:8087}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

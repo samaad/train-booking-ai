@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: booking-service
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/booking
+    username: ${DB_USER:booking}
+    password: ${DB_PASSWORD:booking}
+    pool:
+      max-size: 10
+  flyway:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/booking
+    user: ${DB_USER:booking}
+    password: ${DB_PASSWORD:booking}
+  http:
+    clients:
+      connect-timeout: 1s
+      read-timeout: 3s
+    # @HttpExchange client groups (see ClientsConfiguration). No retries: the only calls made
+    # here are reads, and mutating inter-service calls must never be blindly retried.
+    serviceclient:
+      inventory:
+        base-url: ${INVENTORY_URL:http://localhost:8082}
+      catalog:
+        base-url: ${CATALOG_URL:http://localhost:8081}
+
+server:
+  port: ${PORT:8083}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

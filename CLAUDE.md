@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** Phase 0 (foundation) done — parent POM, `common-core`, `common-web`, `catalog-service` skeleton, profile-gated compose. Next: Phase 1 vertical slice. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** Phase 0 done. 01-services: the 7 deterministic services are built — HTTP APIs + own datastores, tested with Testcontainers, running in compose. Event payload records exist per service but **Kafka is not wired yet** (next pass, per 03/04). `ai-assistant-service` comes last. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -23,6 +23,13 @@ These were verified against Maven Central and bytecode, and are costly to redisc
 - **Kong publishes no OSS images after 3.9.x** (`library/kong` tops out at 3.9.3). 3.10+ ships only as `kong/kong-gateway`, which runs in free mode without a license — that is what compose uses. Never enable Kong's `jwt` plugin.
 - **Boot 4 split WebClient out of `spring-boot-starter-webflux`** — add `spring-boot-starter-webclient`. `@HttpExchange` clients need no custom builders: `@ImportHttpServices(group=…)` + `spring.http.serviceclient.<group>.base-url`, timeouts under `spring.http.clients.*`.
 - `@AutoConfigureWebTestClient` lives in `org.springframework.boot.webtestclient.autoconfigure`.
+- **`@HttpExchange` `LocalDate` params need `@DateTimeFormat(iso = DATE)`** — otherwise they are sent in a locale format (`17/10/2026`) and the callee 400s. Test stubs must validate query params or this slips through.
+- Boot 4 Mongo: connection is `spring.mongodb.uri`, but `spring.data.mongodb.representation.big-decimal` (set `decimal128`). Spring Data does not detect repository interfaces nested in another class.
+- Flyway (`spring-boot-starter-flyway`) with R2DBC: set `spring.flyway.url/user/password`; no Hikari pool is created. Postgres 18 has native `uuidv7()`.
+- R2DBC typed nulls: `io.r2dbc.spi.Parameters.in(R2dbcType.VARCHAR, value)` — not a `Class`.
+- Testcontainers 2.x: `org.testcontainers.postgresql.PostgreSQLContainer`, `org.testcontainers.mongodb.MongoDBContainer`; R2DBC service connections need `testcontainers-r2dbc`. Spring Security `mockJwt()` only works in a MOCK web env — services test real RS256 tokens against a stub JWKS instead.
+- MinIO publishes no community images any more; the object store is `adobe/s3mock` locally (S3 API, AWS SDK v2 async client). Exclude `apache-client`/`apache5-client`/`url-connection-client` from `software.amazon.awssdk:s3`.
+- Jackson is **3.x** (`tools.jackson.*`).
 
 ### The AI path is NOT fully reactive
 
@@ -76,14 +83,17 @@ Consequences that must hold in code:
 - **36 GB RAM / 12 CPU.** gemma4 alone is ~9.6 GB — use Docker Compose **profiles**, never run `full` alongside several JVMs.
 - **Docker Desktop is capped at ~8 GB** — `full` (~9 GB) does not fit. Every container has a `mem_limit`.
 - Host port 5432 is taken by an unrelated `postgres_db` container — `infra/.env` (gitignored) sets `POSTGRES_PORT=5433`. Don't stop that container.
-- Compose: `docker compose -f infra/docker-compose.yml --profile core --profile catalog up -d --build --wait` (run `./mvnw -q package -DskipTests` first — images copy the host-built jar).
+- Compose: `./mvnw -q package -DskipTests`, then `docker compose -f infra/docker-compose.yml --profile <service>|services up -d --build --wait`. A service profile pulls in the infra it needs; `services` starts all seven (~3.5 GB of JVMs). Images copy the host-built jar.
+- Run services from the IDE against compose infra with `DB_PORT=5433` (see the postgres_db note above).
 - No kubectl context configured — K8s manifests are authoring-only, not deployable here.
 
 ## Repo conventions
 
 - Layout: `common-lib/{common-core,common-web}` (plain jars), `services/*` (bootable), `infra/` (compose, init scripts, Kong, Prometheus/Grafana).
 - Ports: catalog 8081, inventory 8082, booking 8083, payment 8084, ticketing 8085, notification 8086, user-profile 8087, ai-assistant 8080. Kong proxy 8000, Keycloak 8180, kafka-ui 8090.
-- `common-core` stays framework-free (ids, `DomainException`, `IdempotencyKey`). `common-web` auto-configures RFC 9457 problem+json error mapping — throw `DomainException` with an `UPPER_SNAKE` code rather than building error responses by hand.
+- `common-core` stays framework-free (ids, `DomainException`, `IdempotencyKey`, `RequestFingerprint`). `common-web` auto-configures RFC 9457 problem+json error mapping — throw `DomainException` with an `UPPER_SNAKE` code rather than building error responses by hand. Use `IdempotencyKeyHeader` for the header and `RemoteCallErrors.from(service)` in `onErrorMap` on every inter-service call.
+- Mutating endpoints take `Idempotency-Key`; store key + `RequestFingerprint` with a UNIQUE constraint; replay returns the original 201, a reused key with a different body is 422. State transitions are single conditional UPDATEs (`WHERE status = … AND version = …`), never read-modify-write.
+- Kong routes: `/api/{catalog,inventory,booking,payment,ticketing,profile}/…` (prefix stripped). notification has no public API.
 
 - Maven multi-module monorepo; parent POM is `<packaging>pom</packaging>` with **no `src/`** (a parent POM cannot carry sources).
 - `spring-boot-maven-plugin` belongs in `<pluginManagement>`, not `<plugins>` — otherwise `common-lib` is repackaged into a non-importable fat jar.

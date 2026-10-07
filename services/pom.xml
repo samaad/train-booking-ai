@@ -15,6 +15,12 @@
 
     <modules>
         <module>catalog-service</module>
+        <module>inventory-service</module>
+        <module>booking-service</module>
+        <module>payment-service</module>
+        <module>user-profile-service</module>
+        <module>ticketing-service</module>
+        <module>notification-service</module>
     </modules>
 
     <build>

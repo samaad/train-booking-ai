@@ -1,0 +1,93 @@
+package org.presight.ai.ticketing.ticket;
+
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+import org.presight.ai.common.error.DomainException;
+import org.presight.ai.common.id.UuidV7;
+import org.presight.ai.ticketing.render.QrTokens;
+import org.presight.ai.ticketing.render.TicketRenderer;
+import org.presight.ai.ticketing.storage.ObjectStore;
+import org.presight.ai.ticketing.ticket.Ticket.Status;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
+
+/**
+ * Issues and voids tickets. {@link #issue} and {@link #voidTicket} are the entry points for the
+ * {@code booking.confirmed.v1} / {@code booking.cancelled.v1} consumers wired in the events pass;
+ * both are idempotent because Kafka delivery is at-least-once.
+ */
+@Service
+public class TicketService {
+
+    private static final Logger log = LoggerFactory.getLogger(TicketService.class);
+
+    private final TicketRepository tickets;
+    private final QrTokens qrTokens;
+    private final TicketRenderer renderer;
+    private final ObjectStore store;
+
+    TicketService(TicketRepository tickets, QrTokens qrTokens, TicketRenderer renderer, ObjectStore store) {
+        this.tickets = tickets;
+        this.qrTokens = qrTokens;
+        this.renderer = renderer;
+        this.store = store;
+    }
+
+    public record IssueTicket(UUID bookingId, String pnr, String passengerName, String trainNumber,
+                              LocalDate travelDate, String fareClass, String seatNo,
+                              String fromStation, String toStation, OffsetDateTime departure) {
+    }
+
+    public Mono<Ticket> issue(IssueTicket cmd) {
+        String claims = String.join("|", cmd.pnr(), cmd.bookingId().toString(), cmd.trainNumber(),
+                cmd.travelDate().toString(), cmd.seatNo());
+        return tickets.insertIfAbsent(new Ticket(UuidV7.generate(), cmd.pnr(), cmd.bookingId(), Status.ISSUED,
+                cmd.passengerName(), cmd.trainNumber(), cmd.travelDate(), cmd.fareClass(), cmd.seatNo(),
+                cmd.fromStation(), cmd.toStation(), cmd.departure(), qrTokens.sign(claims), null, null, null));
+    }
+
+    public Mono<Void> voidTicket(UUID bookingId) {
+        return tickets.voidByBookingId(bookingId).then();
+    }
+
+    public Mono<Ticket> find(String pnr) {
+        return tickets.findByPnr(pnr)
+                .switchIfEmpty(Mono.error(() -> DomainException.notFound("TICKET_NOT_FOUND", "No ticket for PNR " + pnr)));
+    }
+
+    public Mono<byte[]> qr(String pnr) {
+        return valid(pnr).flatMap(renderer::qrPng);
+    }
+
+    /**
+     * Get-or-render: served from the object store when cached, otherwise rendered and stored. An
+     * object-store outage degrades to rendering on every request rather than failing.
+     */
+    public Mono<byte[]> pdf(String pnr) {
+        return valid(pnr).flatMap(ticket -> {
+            String key = "tickets/" + ticket.pnr() + ".pdf";
+            Mono<byte[]> cached = ticket.pdfObjectKey() == null ? Mono.empty()
+                    : store.get(ticket.pdfObjectKey()).onErrorResume(e -> {
+                        log.warn("Object store read failed for {}: {}", key, e.toString());
+                        return Mono.empty();
+                    });
+            return cached.switchIfEmpty(Mono.defer(() -> renderer.pdf(ticket)
+                    .flatMap(bytes -> store.put(key, bytes, "application/pdf")
+                            .then(tickets.recordPdf(ticket.id(), key))
+                            .onErrorResume(e -> {
+                                log.warn("Object store write failed for {}: {}", key, e.toString());
+                                return Mono.empty();
+                            })
+                            .thenReturn(bytes))));
+        });
+    }
+
+    private Mono<Ticket> valid(String pnr) {
+        return find(pnr).flatMap(t -> t.status() == Status.VOIDED
+                ? Mono.error(DomainException.conflict("TICKET_VOIDED", "Ticket " + pnr + " has been voided"))
+                : Mono.just(t));
+    }
+}

@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: inventory-service
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/inventory
+    username: ${DB_USER:inventory}
+    password: ${DB_PASSWORD:inventory}
+    pool:
+      max-size: 10
+  flyway:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/inventory
+    user: ${DB_USER:inventory}
+    password: ${DB_PASSWORD:inventory}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms
+
+server:
+  port: ${PORT:8082}
+  shutdown: graceful
+
+inventory:
+  hold-ttl: 10m
+  booking-horizon: 90d
+  zone: Asia/Dubai
+  contention-filter:
+    enabled: true
+    lock-ttl: 2s
+  # Seat layout per train and fare class. Train numbers and fare classes must match
+  # catalog-service's seed data; seats are materialised lazily per travel date.
+  trains:
+    ER101: &standard-layout
+      BUSINESS: { prefix: B, seats: 12 }
+      ECONOMY: { prefix: E, seats: 48 }
+    ER102: *standard-layout
+    ER201: *standard-layout
+    ER202: *standard-layout
+    ER301:
+      ECONOMY: { prefix: E, seats: 60 }
+    ER302:
+      ECONOMY: { prefix: E, seats: 60 }
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

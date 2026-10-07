@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: notification-service
+  threads:
+    virtual:
+      enabled: false
+  mongodb:
+    uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/notification
+
+server:
+  port: ${PORT:8086}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

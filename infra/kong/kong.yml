@@ -2,12 +2,53 @@
 # Services validate JWTs themselves (Spring Security resource server, Phase 4).
 _format_version: "3.0"
 
+# notification-service has no public API (event-driven only), so it has no route.
 services:
   - name: catalog-service
     url: http://host.docker.internal:8081
     routes:
       - name: catalog
         paths: ["/api/catalog"]
+        protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
+        strip_path: true
+
+  - name: inventory-service
+    url: http://host.docker.internal:8082
+    routes:
+      - name: inventory
+        paths: ["/api/inventory"]
+        protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
+        strip_path: true
+
+  - name: booking-service
+    url: http://host.docker.internal:8083
+    routes:
+      - name: booking
+        paths: ["/api/booking"]
+        protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
+        strip_path: true
+
+  - name: payment-service
+    url: http://host.docker.internal:8084
+    routes:
+      - name: payment
+        paths: ["/api/payment"]
+        protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
+        strip_path: true
+
+  - name: ticketing-service
+    url: http://host.docker.internal:8085
+    routes:
+      - name: ticketing
+        paths: ["/api/ticketing"]
+        protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
+        strip_path: true
+
+  - name: user-profile-service
+    url: http://host.docker.internal:8087
+    routes:
+      - name: profile
+        paths: ["/api/profile"]
         protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
         strip_path: true
 

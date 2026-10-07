@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: ticketing-service
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/ticketing
+    username: ${DB_USER:ticketing}
+    password: ${DB_PASSWORD:ticketing}
+    pool:
+      max-size: 10
+  flyway:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/ticketing
+    user: ${DB_USER:ticketing}
+    password: ${DB_PASSWORD:ticketing}
+
+server:
+  port: ${PORT:8085}
+  shutdown: graceful
+
+ticketing:
+  zone: Asia/Dubai
+  # HMAC key for QR tokens (>= 32 bytes). The default is for local development only.
+  qr-secret: ${TICKET_QR_SECRET:local-dev-only-qr-secret-change-me-0123456789}
+  object-store:
+    endpoint: ${OBJECT_STORE_URL:http://localhost:9090}
+    region: ${OBJECT_STORE_REGION:me-central-1}
+    bucket: ${OBJECT_STORE_BUCKET:tickets}
+    access-key: ${OBJECT_STORE_ACCESS_KEY:local}
+    secret-key: ${OBJECT_STORE_SECRET_KEY:local}
+    path-style: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
