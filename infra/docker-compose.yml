@@ -41,7 +41,7 @@ services:
   # ---------------------------------------------------------------- core
   postgres:
     image: pgvector/pgvector:pg18
-    profiles: [core, full, services, inventory, booking, payment, ticketing, profile]
+    profiles: [core, full, services, inventory, booking, payment, ticketing, profile, assistant]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -72,7 +72,7 @@ services:
   # ---------------------------------------------------------------- mongo
   mongo:
     image: mongo:8.0.32
-    profiles: [mongo, full, services, catalog, notification]
+    profiles: [mongo, full, services, catalog, notification, assistant]
     command: ["mongod", "--wiredTigerCacheSizeGB", "0.5"]
     ports: ["${MONGO_PORT:-27017}:27017"]
     volumes:
@@ -324,6 +324,29 @@ services:
       OIDC_JWKS: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
     depends_on:
       postgres: { condition: service_healthy }
+
+  # The one blocking-with-offload service. Ollama runs on the HOST (Metal GPU), never in Docker:
+  # start it with OLLAMA_HOST=0.0.0.0 so containers can reach it.
+  ai-assistant-service:
+    <<: [*service, *host-gateway]
+    build: { context: .., dockerfile: infra/docker/service.Dockerfile, args: { SERVICE: ai-assistant-service } }
+    image: train-booking/ai-assistant-service:dev
+    profiles: [assistant, full]
+    ports: ["8080:8080"]
+    environment:
+      <<: [*service-env, *postgres-env]
+      PORT: 8080
+      MONGO_HOST: mongo
+      SPRING_AI_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      CATALOG_URL: http://catalog-service:8081
+      INVENTORY_URL: http://inventory-service:8082
+      BOOKING_URL: http://booking-service:8083
+      OIDC_ISSUER: http://localhost:8180/realms/train-booking
+      OIDC_JWKS: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
+    depends_on:
+      postgres: { condition: service_healthy }
+      mongo: { condition: service_healthy }
+    mem_limit: 768m
 
 volumes:
   postgres-data:

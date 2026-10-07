@@ -1,5 +1,6 @@
 package org.presight.ai.common.id;
 
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.UUID;
@@ -10,10 +11,15 @@ import java.util.UUID;
  * <p>Time-ordered, so they index well as Postgres primary keys (no B-tree page splits
  * from random v4 inserts), and unguessable enough to serve as server-issued handles
  * such as {@code holdId}. JDK 25 has no built-in v7 factory.
+ *
+ * <p>Uses the DRBG {@link SecureRandom}, not the platform default: NativePRNG refills its buffer by
+ * reading {@code /dev/urandom} — a blocking file read, on whatever thread asks, which in a WebFlux
+ * service is an event-loop thread (BlockHound catches it). DRBG reads entropy once, when this class
+ * initialises, and is pure CPU afterwards.
  */
 public final class UuidV7 {
 
-    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final SecureRandom RANDOM = drbg();
 
     private UuidV7() {
     }
@@ -44,6 +50,17 @@ public final class UuidV7 {
             lsb = (lsb << 8) | (bytes[i] & 0xFF);
         }
         return new UUID(msb, lsb);
+    }
+
+    /** A seeded DRBG; the one-time seed read happens here, during class initialisation. */
+    static SecureRandom drbg() {
+        try {
+            SecureRandom random = SecureRandom.getInstance("DRBG");
+            random.nextBytes(new byte[16]); // force seeding now, not on the first request
+            return random;
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("DRBG is mandatory since JDK 9", e);
+        }
     }
 
     /** Extracts the embedded creation time. Rejects non-v7 ids rather than returning garbage. */

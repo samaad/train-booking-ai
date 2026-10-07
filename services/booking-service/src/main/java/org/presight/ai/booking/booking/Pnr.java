@@ -6,10 +6,20 @@ import java.security.SecureRandom;
 final class Pnr {
 
     private static final char[] ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
-    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final SecureRandom RANDOM = drbg(); // not NativePRNG: no /dev/urandom reads on the event loop
     static final int LENGTH = 6;
 
     private Pnr() {
+    }
+
+    private static SecureRandom drbg() {
+        try {
+            SecureRandom random = SecureRandom.getInstance("DRBG");
+            random.nextBytes(new byte[8]);
+            return random;
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("DRBG is mandatory since JDK 9", e);
+        }
     }
 
     static String next() {

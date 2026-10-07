@@ -13,4 +13,4 @@ scrape_configs:
           - host.docker.internal:8085 # ticketing-service
           - host.docker.internal:8086 # notification-service
           - host.docker.internal:8087 # user-profile-service
-        # ai-assistant-service (8080) is added with that service
+          - host.docker.internal:8080 # ai-assistant-service

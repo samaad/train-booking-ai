@@ -1,0 +1,92 @@
+spring:
+  application:
+    name: ai-assistant-service
+  threads:
+    virtual:
+      enabled: false
+  # JDBC pool — pgvector only (PgVectorStore is JDBC-only). Kept >= vectorScheduler's cap so
+  # retrieval never queues on connection acquisition, and small so the box's Postgres survives.
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/vectordb
+    username: ${DB_USER:vectordb}
+    password: ${DB_PASSWORD:vectordb}
+    hikari:
+      maximum-pool-size: 8
+      minimum-idle: 1
+  mongodb:
+    uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/assistant
+  ai:
+    ollama:
+      # On the host, not in Docker (no GPU in macOS containers). From a container use
+      # http://host.docker.internal:11434 with OLLAMA_HOST=0.0.0.0 set on the host.
+      base-url: ${SPRING_AI_OLLAMA_BASE_URL:http://localhost:11434}
+      init:
+        pull-model-strategy: never
+      chat:
+        model: ${CHAT_MODEL:gemma4:latest}
+      embedding:
+        model: ${EMBEDDING_MODEL:mxbai-embed-large}
+    vectorstore:
+      pgvector:
+        dimensions: 1024          # mxbai-embed-large; set explicitly so startup never asks Ollama
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        initialize-schema: false  # Flyway owns the table (V1__vector_store.sql)
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/train-booking}
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8180/realms/train-booking/protocol/openid-connect/certs}
+  http:
+    # Global defaults also apply to the clients Spring AI builds for Ollama, so they must allow a slow
+    # model: gemma4 can take many seconds to load and answer. The orchestrator's own per-chunk timeout
+    # (assistant.chat-timeout) is the real bound; this is only a backstop just above it.
+    clients:
+      connect-timeout: 2s
+      read-timeout: 130s
+    # Service calls are fast reads (and one idempotent hold): tight per-group timeouts.
+    serviceclient:
+      catalog:
+        base-url: ${CATALOG_URL:http://localhost:8081}
+        read-timeout: 3s
+      inventory:
+        base-url: ${INVENTORY_URL:http://localhost:8082}
+        read-timeout: 2s
+      booking:
+        base-url: ${BOOKING_URL:http://localhost:8083}
+        read-timeout: 5s
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+assistant:
+  zone: Asia/Dubai
+  # Bounded, never Schedulers.boundedElastic(): ~8 concurrent gemma4 requests is what a 12-CPU box
+  # sustains (an estimate — tune against llm.ttft). Overflow is rejected into the fallback tiers.
+  max-concurrent-chats: 8
+  scheduler-queue: 100
+  chat-timeout: 120s       # per model round. No retry on Ollama, ever.
+  temperature: 0.2         # gemma4 ships at 1.0 — far too high for reliable tool calls
+  history-turns: 10
+  max-tool-calls-per-turn: 5
+  max-mutating-calls-per-turn: 2
+  rag:
+    top-k: 4
+    similarity-threshold: 0.5
+    ingest-on-startup: true
+    corpus: classpath*:rag-corpus/*.md
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

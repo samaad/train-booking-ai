@@ -30,6 +30,8 @@
         <zxing.version>3.5.4</zxing.version>
         <openpdf.version>3.0.5</openpdf.version>
         <awssdk.version>2.55.12</awssdk.version>
+        <!-- ai-assistant-service tests: fail on any blocking call on an event-loop thread -->
+        <blockhound.version>1.0.17.RELEASE</blockhound.version>
     </properties>
 
     <dependencyManagement>
@@ -58,6 +60,16 @@
                 <groupId>com.github.librepdf</groupId>
                 <artifactId>openpdf</artifactId>
                 <version>${openpdf.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.projectreactor.tools</groupId>
+                <artifactId>blockhound</artifactId>
+                <version>${blockhound.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.projectreactor.tools</groupId>
+                <artifactId>blockhound-junit-platform</artifactId>
+                <version>${blockhound.version}</version>
             </dependency>
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>

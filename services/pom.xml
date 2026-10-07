@@ -21,6 +21,7 @@
         <module>user-profile-service</module>
         <module>ticketing-service</module>
         <module>notification-service</module>
+        <module>ai-assistant-service</module>
     </modules>
 
     <build>

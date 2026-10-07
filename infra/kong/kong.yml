@@ -52,6 +52,15 @@ services:
         protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
         strip_path: true
 
+  - name: ai-assistant-service
+    url: http://host.docker.internal:8080
+    read_timeout: 180000 # SSE chat: a turn may run up to the 120 s model timeout per round
+    routes:
+      - name: assistant
+        paths: ["/api/assistant"]
+        protocols: [http, https]
+        strip_path: true
+
 plugins:
   - name: rate-limiting
     config:

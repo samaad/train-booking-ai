@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** Phase 0 done. 01-services: the 7 deterministic services are built — HTTP APIs + own datastores, tested with Testcontainers, running in compose. Event payload records exist per service but **Kafka is not wired yet** (next pass, per 03/04). `ai-assistant-service` comes last. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** all 8 services from 01-services are built and tested (Testcontainers; BlockHound in the AI service). `ai-assistant-service` is smoke-tested against real gemma4 + mxbai. Event payload records exist per service but **Kafka is not wired yet** (next pass, per 03/04) — so nothing confirms a booking after payment and no tickets are issued at runtime. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -29,7 +29,17 @@ These were verified against Maven Central and bytecode, and are costly to redisc
 - R2DBC typed nulls: `io.r2dbc.spi.Parameters.in(R2dbcType.VARCHAR, value)` — not a `Class`.
 - Testcontainers 2.x: `org.testcontainers.postgresql.PostgreSQLContainer`, `org.testcontainers.mongodb.MongoDBContainer`; R2DBC service connections need `testcontainers-r2dbc`. Spring Security `mockJwt()` only works in a MOCK web env — services test real RS256 tokens against a stub JWKS instead.
 - MinIO publishes no community images any more; the object store is `adobe/s3mock` locally (S3 API, AWS SDK v2 async client). Exclude `apache-client`/`apache5-client`/`url-connection-client` from `software.amazon.awssdk:s3`.
-- Jackson is **3.x** (`tools.jackson.*`).
+- Jackson is **3.x** (`tools.jackson.*`). Decoding normalises `OffsetDateTime` to UTC — convert to the railway zone before showing times to the LLM, or it narrates "03:55" for a 07:55 departure.
+- **Never call `UUID.randomUUID()` / default `SecureRandom` on an event loop**: NativePRNG reads `/dev/urandom` (blocking file I/O). `UuidV7` uses DRBG for this reason.
+
+### Spring AI 2.0.1 — verified from sources
+
+- Models no longer execute tools. **`ChatClient`'s `ToolCallingAdvisor` hard-codes `Schedulers.boundedElastic()`** for tool execution and `ChatModelStreamAdvisor` `publishOn(boundedElastic)` — incompatible with a bounded `aiScheduler`. So `OllamaChatOrchestrator` drives `ChatModel.stream` directly and calls `ToolCallingManager.executeToolCalls` itself on `aiScheduler`. Identity goes in `ToolContext`.
+- Properties are flat: `spring.ai.ollama.chat.model`, `spring.ai.ollama.chat.temperature` (`options.*` is deprecated), `spring.ai.ollama.embedding.model`, `spring.ai.vectorstore.pgvector.{dimensions,index-type,distance-type,initialize-schema}`. Set `dimensions: 1024` or startup calls Ollama.
+- Ollama embeddings go through a blocking `RestClient` — fine only on `vectorScheduler`.
+- **Global `spring.http.clients.read-timeout` also applies to Spring AI's Ollama clients.** Keep it above the model timeout; put tight timeouts on `spring.http.serviceclient.<group>.read-timeout`.
+- BlockHound: surefire needs `-XX:+AllowRedefinitionToAddDeleteMethods -XX:+EnableDynamicAgentLoading`. Tolerated calls live in `AllowedBlockingCalls` (test `META-INF/services`) — each must be justified there.
+- gemma4 observed: correct tool calls on explicit requests; tends to ask clarifying questions before mutating tools; may emit no text after `confirmBooking`.
 
 ### The AI path is NOT fully reactive
 
@@ -78,7 +88,7 @@ Consequences that must hold in code:
 
 ## Local environment
 
-- Ollama 0.34.2 runs **on the host**, not in Docker (macOS containers get no GPU). Reach it via `host.docker.internal:11434` from containers; needs `OLLAMA_HOST=0.0.0.0`.
+- Ollama (now 0.35.0) runs **on the host**, not in Docker (macOS containers get no GPU). Reach it via `host.docker.internal:11434` from containers; needs `OLLAMA_HOST=0.0.0.0`.
 - Models already pulled: `gemma4:latest` (9.6 GB, tool-capable), `mxbai-embed-large`.
 - **36 GB RAM / 12 CPU.** gemma4 alone is ~9.6 GB — use Docker Compose **profiles**, never run `full` alongside several JVMs.
 - **Docker Desktop is capped at ~8 GB** — `full` (~9 GB) does not fit. Every container has a `mem_limit`.
@@ -90,10 +100,11 @@ Consequences that must hold in code:
 ## Repo conventions
 
 - Layout: `common-lib/{common-core,common-web}` (plain jars), `services/*` (bootable), `infra/` (compose, init scripts, Kong, Prometheus/Grafana).
+- AI service: `POST /chat` (SSE events: conversation, token, tool, confirmation, warning, fallback, error, done), `GET /conversations`, `GET /conversations/{id}/messages`; Kong `/api/assistant`. Compose profile `assistant`.
 - Ports: catalog 8081, inventory 8082, booking 8083, payment 8084, ticketing 8085, notification 8086, user-profile 8087, ai-assistant 8080. Kong proxy 8000, Keycloak 8180, kafka-ui 8090.
 - `common-core` stays framework-free (ids, `DomainException`, `IdempotencyKey`, `RequestFingerprint`). `common-web` auto-configures RFC 9457 problem+json error mapping — throw `DomainException` with an `UPPER_SNAKE` code rather than building error responses by hand. Use `IdempotencyKeyHeader` for the header and `RemoteCallErrors.from(service)` in `onErrorMap` on every inter-service call.
 - Mutating endpoints take `Idempotency-Key`; store key + `RequestFingerprint` with a UNIQUE constraint; replay returns the original 201, a reused key with a different body is 422. State transitions are single conditional UPDATEs (`WHERE status = … AND version = …`), never read-modify-write.
-- Kong routes: `/api/{catalog,inventory,booking,payment,ticketing,profile}/…` (prefix stripped). notification has no public API.
+- Kong routes: `/api/{catalog,inventory,booking,payment,ticketing,profile,assistant}/…` (prefix stripped). notification has no public API.
 
 - Maven multi-module monorepo; parent POM is `<packaging>pom</packaging>` with **no `src/`** (a parent POM cannot carry sources).
 - `spring-boot-maven-plugin` belongs in `<pluginManagement>`, not `<plugins>` — otherwise `common-lib` is repackaged into a non-importable fat jar.
