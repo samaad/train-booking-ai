@@ -1,0 +1,18 @@
+# DB-less declarative config. Routing + rate limiting only — no auth plugins here.
+# Services validate JWTs themselves (Spring Security resource server, Phase 4).
+_format_version: "3.0"
+
+services:
+  - name: catalog-service
+    url: http://host.docker.internal:8081
+    routes:
+      - name: catalog
+        paths: ["/api/catalog"]
+        protocols: [http, https] # 3.16 defaults routes to https-only (426); plain http is local-dev only
+        strip_path: true
+
+plugins:
+  - name: rate-limiting
+    config:
+      minute: 600
+      policy: local

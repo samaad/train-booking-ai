@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: catalog-service
+  threads:
+    virtual:
+      enabled: false # WebFlux event loop; virtual threads belong to the future MVC batch service
+
+server:
+  port: ${PORT:8081}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
