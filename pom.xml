@@ -19,6 +19,7 @@
     <modules>
         <module>common-lib</module>
         <module>services</module>
+        <module>streams</module>
     </modules>
 
     <properties>

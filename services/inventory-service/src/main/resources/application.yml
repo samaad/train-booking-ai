@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: classpath:train-booking-observability.yml
   application:
     name: inventory-service
   r2dbc:

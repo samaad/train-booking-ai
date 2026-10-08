@@ -1,4 +1,6 @@
-# Build context is the repo root; only built service jars are needed.
+# Build context is the repo root; only built jars are needed.
 **
 !services/*/target/*.jar
+!streams/*/target/*.jar
 services/*/target/*.jar.original
+streams/*/target/*.jar.original

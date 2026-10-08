@@ -35,6 +35,9 @@ x-service-env: &service-env
   OIDC_JWKS: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
   OIDC_TOKEN_URI: http://keycloak:8080/realms/train-booking/protocol/openid-connect/token
   TRAIN_SERVICES_SECRET: ${TRAIN_SERVICES_SECRET:-dev-only-train-services-secret}
+  # Traces → collector → Tempo; logs as structured JSON (ECS) carrying traceId/spanId.
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+  LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
 
 # Each service reaches its own database by name; per-service credentials come from the
 # service's defaults (role = database name), created by postgres/init/01-databases.sh.
@@ -93,7 +96,7 @@ services:
   # ---------------------------------------------------------------- kafka (KRaft, no ZooKeeper)
   kafka:
     image: apache/kafka:4.3.1
-    profiles: [kafka, full, services, catalog, inventory, booking, payment, ticketing, notification, profile, assistant]
+    profiles: [kafka, full, services, catalog, inventory, booking, payment, ticketing, notification, profile, assistant, availability]
     ports: ["9092:9092"]
     environment:
       KAFKA_NODE_ID: 1
@@ -211,7 +214,29 @@ services:
     mem_limit: 768m
 
   # ---------------------------------------------------------------- observability
-  # Tempo + OTel collector are added in Phase 6 with tracing (Tempo is now 3.x).
+  # Every service exports traces to the collector, so it runs with any service profile; Tempo, Prometheus and
+  # Grafana come with `observability`. Tempo 2.10 (maintained) rather than 3.x, whose architecture changed.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    profiles: [observability, full, services, catalog, inventory, booking, payment, ticketing, notification, profile, assistant, availability]
+    command: ["--config=/etc/otelcol/config.yml"]
+    ports:
+      - "4317:4317" # OTLP gRPC (services run from the IDE export here too)
+      - "4318:4318" # OTLP HTTP
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol/config.yml:ro
+    mem_limit: 256m
+
+  tempo:
+    image: grafana/tempo:2.10.8
+    profiles: [observability, full]
+    command: ["-config.file=/etc/tempo.yml"]
+    ports: ["3200:3200"]
+    volumes:
+      - ./observability/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/var/tempo
+    mem_limit: 512m
+
   prometheus:
     image: prom/prometheus:v3.13.4
     profiles: [observability, full]
@@ -230,7 +255,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on: [prometheus]
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus, tempo]
     mem_limit: 384m
 
   # ---------------------------------------------------------------- object store (ticketing)
@@ -238,7 +264,7 @@ services:
   s3mock:
     image: adobe/s3mock:5.2.3
     profiles: [objectstore, ticketing, services, full]
-    ports: ["9090:9090"]
+    ports: ["9190:9090"] # 9090 is Prometheus
     environment:
       COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: tickets
     mem_limit: 384m
@@ -367,7 +393,22 @@ services:
       mongo: { condition: service_healthy }
     mem_limit: 768m
 
+  # Kafka Streams: seat-availability materialized view, queryable store, live seat map (WebSocket).
+  seat-availability-streams:
+    <<: *service
+    build: { context: .., dockerfile: infra/docker/service.Dockerfile, args: { SERVICE: seat-availability-streams, MODULE_DIR: streams } }
+    image: train-booking/seat-availability-streams:dev
+    profiles: [availability, services, full]
+    ports: ["8089:8089"] # 8088 is commonly ksqlDB
+    environment:
+      <<: *service-env
+      PORT: 8089
+      STREAMS_STATE_DIR: /tmp/kafka-streams
+    depends_on:
+      kafka: { condition: service_healthy }
+
 volumes:
+  tempo-data:
   postgres-data:
   mongo-data:
   kafka-data:

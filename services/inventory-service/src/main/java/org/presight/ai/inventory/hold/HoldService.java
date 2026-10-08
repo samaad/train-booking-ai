@@ -1,5 +1,6 @@
 package org.presight.ai.inventory.hold;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -35,9 +36,12 @@ public class HoldService {
     private final TransactionalOperator tx;
     private final Outbox outbox;
     private final Duration holdTtl;
+    private final MeterRegistry meters;
 
     HoldService(HoldRepository holds, SeatLayout layout, SeatContentionFilter contentionFilter,
-                TransactionalOperator tx, Outbox outbox, InventoryProperties properties) {
+                TransactionalOperator tx, Outbox outbox, InventoryProperties properties,
+                MeterRegistry meters) {
+        this.meters = meters;
         this.holds = holds;
         this.layout = layout;
         this.contentionFilter = contentionFilter;
@@ -124,6 +128,7 @@ public class HoldService {
                         ? Mono.<Void>empty()
                         : holds.releaseSeatHeldOrCommitted(holdId)
                                 .flatMap(rows -> released(hold, rows, ReleaseReason.BOOKING_CANCELLED))
+                                .doOnSuccess(v -> meters.counter("saga.compensation", "type", "seat_release").increment())
                                 .then(holds.updateStatus(holdId, HoldStatus.RELEASED))
                                 .then())
                 .as(tx::transactional);
@@ -133,6 +138,7 @@ public class HoldService {
     Mono<Void> expire(Hold hold) {
         return holds.releaseSeat(hold.id())
                 .flatMap(rows -> released(hold, rows, ReleaseReason.EXPIRED))
+                .doOnSuccess(v -> meters.counter("seat.hold.expired").increment())
                 .then(holds.updateStatus(hold.id(), HoldStatus.EXPIRED))
                 .then();
     }
@@ -156,11 +162,21 @@ public class HoldService {
                 .flatMap(s -> holds.insertHold(holdId, cmd.trainNumber(), cmd.travelDate(), s, key.value(), fingerprint, cmd.userId()))
                 .flatMap(h -> outbox.append(Topics.SEAT_HELD, new SeatHeld(UuidV7.generate(), h.id(), h.trainNumber(),
                         h.travelDate(), h.fareClass(), h.seatNo(), h.expiresAt(), Instant.now())).thenReturn(h))
-                .as(tx::transactional);
+                .as(tx::transactional)
+                .doOnNext(h -> {
+                    meters.counter("booking.funnel", "stage", "hold").increment();
+                    meters.counter("seat.hold.placed").increment(); // not "created": Prometheus reserves the _created suffix
+                })
+                .doOnError(e -> e instanceof DomainException d && "SEAT_UNAVAILABLE".equals(d.code()),
+                        // A lost race for a seat: per-train contention is the capacity signal (07-observability).
+                        e -> meters.counter("seat.hold.contention", "train", cmd.trainNumber()).increment());
 
         if (cmd.seatNo() != null) {
             String seatKey = cmd.trainNumber() + ':' + cmd.travelDate() + ':' + cmd.seatNo();
-            attempt = contentionFilter.guard(seatKey, holdId.toString(), attempt);
+            attempt = contentionFilter.guard(seatKey, holdId.toString(), attempt)
+                    .doOnError(e -> e instanceof DomainException d && "SEAT_UNAVAILABLE".equals(d.code())
+                                    && e.getMessage() != null && e.getMessage().contains("another request"),
+                            e -> meters.counter("seat.hold.contention", "train", cmd.trainNumber()).increment());
         }
 
         // Same key raced in concurrently: our transaction rolled back (seat included); answer with the winner's hold.

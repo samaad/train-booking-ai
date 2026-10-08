@@ -4,8 +4,9 @@
 
 FROM eclipse-temurin:25-jre AS extract
 ARG SERVICE
+ARG MODULE_DIR=services
 WORKDIR /build
-COPY services/${SERVICE}/target/${SERVICE}-*.jar app.jar
+COPY ${MODULE_DIR}/${SERVICE}/target/${SERVICE}-*.jar app.jar
 RUN java -Djarmode=tools -jar app.jar extract --layers --launcher --destination extracted
 
 FROM eclipse-temurin:25-jre

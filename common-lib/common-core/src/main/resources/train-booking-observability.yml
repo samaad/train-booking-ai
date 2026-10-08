@@ -1,0 +1,30 @@
+# Shared observability defaults, imported by every service:
+#   spring.config.import: classpath:train-booking-observability.yml
+# Traces are exported only where MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT is set (compose), so
+# tests and IDE runs never try to reach a collector.
+management:
+  metrics:
+    distribution:
+      # Real histograms (not client-side percentiles), so p95/p99 aggregate correctly across instances.
+      percentiles-histogram:
+        http.server.requests: true
+        llm.ttft: true
+        llm.request.duration: true
+        rag.retrieval.duration: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0} # 100% in dev; prod: 0.1 + keep errors (collector)
+  otlp:
+    metrics:
+      export:
+        enabled: false # metrics are scraped by Prometheus, not pushed
+spring:
+  reactor:
+    # Restores ThreadLocals (trace context) across operators and scheduler hops — including the
+    # aiScheduler boundary into tool callbacks, where a trace would otherwise die.
+    context-propagation: auto
+  kafka:
+    template:
+      observation-enabled: true # traceparent onto every record we send
+    listener:
+      observation-enabled: true # ...and continued by every listener

@@ -1,5 +1,6 @@
 package org.presight.ai.booking.booking;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -56,9 +57,11 @@ class BookingSaga {
     private final Outbox outbox;
     private final IdempotentHandler handler;
     private final ServiceTokens serviceTokens;
+    private final MeterRegistry meters;
 
     BookingSaga(BookingRepository bookings, InventoryClient inventory, Outbox outbox, IdempotentHandler handler,
-                ServiceTokens serviceTokens) {
+                ServiceTokens serviceTokens, MeterRegistry meters) {
+        this.meters = meters;
         this.bookings = bookings;
         this.inventory = inventory;
         this.outbox = outbox;
@@ -100,7 +103,8 @@ class BookingSaga {
                     .timeout(COMMIT_TIMEOUT)
                     .onErrorMap(RemoteCallErrors.from("inventory"))
                     .then(bookings.advance(b.id(), SagaState.PAYMENT_PENDING, SagaState.SEATS_COMMITTED, Status.CONFIRMED, null)
-                            .flatMap(rows -> rows == 0 ? Mono.empty() : outbox.append(Topics.BOOKING_CONFIRMED, confirmed(b))))
+                            .flatMap(rows -> rows == 0 ? Mono.empty() : outbox.append(Topics.BOOKING_CONFIRMED, confirmed(b))
+                                    .doOnSuccess(v -> meters.counter("booking.funnel", "stage", "confirm").increment())))
                     // The hold lapsed before payment arrived: compensate. Outages propagate and are retried.
                     .onErrorResume(err -> err instanceof DomainException d && d.category() == ErrorCategory.CONFLICT,
                             err -> cancel(b, SagaState.PAYMENT_PENDING, CancelReason.HOLD_EXPIRED, err.getMessage()));
@@ -111,7 +115,9 @@ class BookingSaga {
         return bookings.advance(b.id(), from, SagaState.CANCELLED, Status.CANCELLED, reason.name())
                 .flatMap(rows -> rows == 0
                         ? Mono.<Void>empty()
-                        : outbox.append(Topics.BOOKING_CANCELLED, BookingService.cancelled(b, reason, detail)));
+                        : outbox.append(Topics.BOOKING_CANCELLED, BookingService.cancelled(b, reason, detail))
+                                // Every saga-driven cancellation is a near-miss worth reviewing (07-observability).
+                                .doOnSuccess(v -> meters.counter("saga.compensation", "type", reason.name().toLowerCase()).increment()));
     }
 
     private static BookingConfirmed confirmed(Booking b) {

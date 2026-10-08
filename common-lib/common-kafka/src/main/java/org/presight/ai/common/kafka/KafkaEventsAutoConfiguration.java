@@ -1,5 +1,6 @@
 package org.presight.ai.common.kafka;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -56,13 +57,15 @@ public class KafkaEventsAutoConfiguration {
      */
     @Bean
     CommonErrorHandler eventErrorHandler(KafkaTemplate<Object, Object> template,
-                                         @Value("${spring.kafka.consumer.group-id:}") String group) {
+                                         @Value("${spring.kafka.consumer.group-id:}") String group,
+                                         org.springframework.beans.factory.ObjectProvider<MeterRegistry> meters) {
         DeadLetterPublishingRecoverer publisher = new DeadLetterPublishingRecoverer(template,
                 (record, ex) -> new TopicPartition(Topics.deadLetter(record.topic(), group), -1));
         // A dead-lettered event is an incident: say so, with the cause, before parking it.
         org.springframework.kafka.listener.ConsumerRecordRecoverer recoverer = (record, ex) -> {
             log.error("Dead-lettering {}-{}@{} to {}: {}", record.topic(), record.partition(), record.offset(),
                     Topics.deadLetter(record.topic(), group), rootCause(ex).toString());
+            meters.ifAvailable(m -> m.counter("kafka.dead_letter", "topic", record.topic(), "group", group).increment());
             publisher.accept(record, ex);
         };
         org.springframework.kafka.support.ExponentialBackOffWithMaxRetries backOff =

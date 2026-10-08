@@ -44,20 +44,24 @@ public class OutboxRelay implements SmartLifecycle {
     private final KafkaTemplate<String, String> kafka;
     private final Duration interval;
     private final int batchSize;
+    private final TraceContext traces;
+    private final tools.jackson.databind.json.JsonMapper json;
     private final AtomicLong lagSeconds = new AtomicLong();
     private Scheduler scheduler;
     private Disposable loop;
 
     public OutboxRelay(DatabaseClient db, TransactionalOperator tx, KafkaTemplate<String, String> kafka,
-                       Duration interval, int batchSize) {
+                       Duration interval, int batchSize, TraceContext traces, tools.jackson.databind.json.JsonMapper json) {
         this.db = db;
         this.tx = tx;
         this.kafka = kafka;
         this.interval = interval;
         this.batchSize = batchSize;
+        this.traces = traces;
+        this.json = json;
     }
 
-    private record Row(UUID id, String topic, String key, String payload) {
+    private record Row(UUID id, String topic, String key, String payload, String headers) {
     }
 
     /**
@@ -69,7 +73,7 @@ public class OutboxRelay implements SmartLifecycle {
     public Mono<Integer> relayOnce() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         return db.sql("""
-                        SELECT id, topic, message_key, payload::text AS payload FROM outbox
+                        SELECT id, topic, message_key, payload::text AS payload, headers::text AS headers FROM outbox
                         WHERE published_at IS NULL
                         ORDER BY seq
                         LIMIT :limit
@@ -99,7 +103,11 @@ public class OutboxRelay implements SmartLifecycle {
         ProducerRecord<String, String> record = new ProducerRecord<>(row.topic(), row.key(), row.payload());
         record.headers().add(EventHeaders.EVENT_ID, row.id().toString().getBytes(StandardCharsets.UTF_8));
         record.headers().add(EventHeaders.EVENT_TYPE, row.topic().getBytes(StandardCharsets.UTF_8));
-        return Mono.fromFuture(() -> kafka.send(record)).timeout(SEND_TIMEOUT).then();
+        // Publish inside the trace that wrote the event, so the send (and the consumer) continue that trace.
+        java.util.Map<String, String> traceHeaders = row.headers() == null ? java.util.Map.of()
+                : json.readValue(row.headers(), new tools.jackson.core.type.TypeReference<java.util.Map<String, String>>() {});
+        return Mono.fromFuture(() -> traces.within(traceHeaders, "outbox publish " + row.topic(), () -> kafka.send(record)))
+                .timeout(SEND_TIMEOUT).then();
     }
 
     private Mono<Void> recordFailure(Throwable e) {
@@ -160,6 +168,6 @@ public class OutboxRelay implements SmartLifecycle {
 
     private static Row row(Readable r) {
         return new Row(r.get("id", UUID.class), r.get("topic", String.class), r.get("message_key", String.class),
-                r.get("payload", String.class));
+                r.get("payload", String.class), r.get("headers", String.class));
     }
 }

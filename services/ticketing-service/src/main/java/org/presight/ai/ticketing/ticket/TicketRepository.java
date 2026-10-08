@@ -1,5 +1,7 @@
 package org.presight.ai.ticketing.ticket;
 
+import io.r2dbc.spi.Parameters;
+import io.r2dbc.spi.R2dbcType;
 import io.r2dbc.spi.Readable;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -28,7 +30,7 @@ class TicketRepository {
                         ON CONFLICT ON CONSTRAINT uq_ticket_booking DO NOTHING
                         """)
                 .bind("id", t.id())
-                .bind("userId", io.r2dbc.spi.Parameters.in(io.r2dbc.spi.R2dbcType.VARCHAR, t.userId()))
+                .bind("userId", Parameters.in(R2dbcType.VARCHAR, t.userId()))
                 .bind("pnr", t.pnr())
                 .bind("bookingId", t.bookingId())
                 .bind("passenger", t.passengerName())

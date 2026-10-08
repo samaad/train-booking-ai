@@ -14,22 +14,26 @@ public class Outbox {
 
     private final DatabaseClient db;
     private final JsonMapper json;
+    private final TraceContext traces;
 
-    public Outbox(DatabaseClient db, JsonMapper json) {
+    public Outbox(DatabaseClient db, JsonMapper json, TraceContext traces) {
         this.db = db;
         this.json = json;
+        this.traces = traces;
     }
 
     public Mono<Void> append(String topic, Event event) {
-        return Mono.fromCallable(() -> json.writeValueAsString(event))
-                .flatMap(payload -> db.sql("""
-                                INSERT INTO outbox (id, topic, message_key, payload)
-                                VALUES (:id, :topic, :key, CAST(:payload AS jsonb))
+        // fromCallable runs with the caller's trace context restored (automatic context propagation).
+        return Mono.fromCallable(() -> new String[] {json.writeValueAsString(event), json.writeValueAsString(traces.capture())})
+                .flatMap(values -> db.sql("""
+                                INSERT INTO outbox (id, topic, message_key, payload, headers)
+                                VALUES (:id, :topic, :key, CAST(:payload AS jsonb), CAST(:headers AS jsonb))
                                 """)
                         .bind("id", event.eventId())
                         .bind("topic", topic)
                         .bind("key", String.valueOf(event.key()))
-                        .bind("payload", payload)
+                        .bind("payload", values[0])
+                        .bind("headers", values[1])
                         .then());
     }
 }

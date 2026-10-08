@@ -1,14 +1,16 @@
 package org.presight.ai.booking.booking;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.UUID;
 import org.presight.ai.booking.booking.Booking.SagaState;
 import org.presight.ai.booking.booking.Booking.Status;
-import org.presight.ai.booking.client.CatalogClient;
 import org.presight.ai.booking.client.CatalogClient.FareRuleView;
 import org.presight.ai.booking.client.CatalogClient.JourneyView;
-import org.presight.ai.booking.client.InventoryClient;
+import org.presight.ai.booking.client.CatalogClient;
 import org.presight.ai.booking.client.InventoryClient.HoldView;
+import org.presight.ai.booking.client.InventoryClient;
 import org.presight.ai.common.error.DomainException;
 import org.presight.ai.common.id.UuidV7;
 import org.presight.ai.common.idempotency.IdempotencyKey;
@@ -37,9 +39,11 @@ public class BookingService {
     private final CatalogClient catalog;
     private final Outbox outbox;
     private final TransactionalOperator tx;
+    private final Counter booked;
 
     BookingService(BookingRepository bookings, InventoryClient inventory, CatalogClient catalog, Outbox outbox,
-                   TransactionalOperator tx) {
+                   TransactionalOperator tx, MeterRegistry meters) {
+        this.booked = meters.counter("booking.funnel", "stage", "book");
         this.bookings = bookings;
         this.inventory = inventory;
         this.catalog = catalog;
@@ -132,7 +136,8 @@ public class BookingService {
                 null, fingerprint, 0, Instant.now()), key.value())
                 // The booking and its saga-entry event commit together, or not at all.
                 .flatMap(b -> outbox.append(Topics.BOOKING_CREATED, created(b)).thenReturn(b))
-                .as(tx::transactional));
+                .as(tx::transactional)
+                .doOnNext(b -> booked.increment()));
 
         return attempt
                 // A PNR collision is our own uniqueness check failing — regenerating is safe. Nothing else retries.

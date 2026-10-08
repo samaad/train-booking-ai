@@ -1,5 +1,6 @@
 package org.presight.ai.payment.payment;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
@@ -19,9 +20,9 @@ import org.presight.ai.common.security.CallerIdentity;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
 import org.presight.ai.payment.payment.PaymentIntent.Status;
 import org.presight.ai.payment.payment.PaymentRepository.Charge;
-import org.presight.ai.payment.psp.PaymentGateway;
 import org.presight.ai.payment.psp.PaymentGateway.Approved;
 import org.presight.ai.payment.psp.PaymentGateway.Declined;
+import org.presight.ai.payment.psp.PaymentGateway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,9 +52,11 @@ public class PaymentService {
     private final Outbox outbox;
     private final TransactionalOperator tx;
     private final Duration pspTimeout;
+    private final MeterRegistry meters;
 
     PaymentService(PaymentRepository payments, PaymentGateway psp, Outbox outbox, TransactionalOperator tx,
-                   @Value("${payment.psp-timeout}") Duration pspTimeout) {
+                   @Value("${payment.psp-timeout}") Duration pspTimeout, MeterRegistry meters) {
+        this.meters = meters;
         this.payments = payments;
         this.psp = psp;
         this.outbox = outbox;
@@ -133,7 +136,8 @@ public class PaymentService {
         return payments.cancelCharge(bookingId)
                 .then(payments.findLiveByBooking(bookingId))
                 .filter(intent -> intent.status() == Status.AUTHORIZED)
-                .flatMap(intent -> refund(intent.id()))
+                .flatMap(intent -> refund(intent.id())
+                        .doOnSuccess(r -> meters.counter("saga.compensation", "type", "refund").increment()))
                 .then();
     }
 
@@ -157,7 +161,8 @@ public class PaymentService {
             case Approved a -> payments.transition(intent.id(), Status.PENDING, Status.AUTHORIZED, a.pspReference(), null)
                     .flatMap(rows -> rows == 0 ? Mono.<Void>empty() : outbox.append(Topics.PAYMENT_AUTHORIZED,
                             new PaymentAuthorized(UuidV7.generate(), intent.id(), intent.bookingId(), intent.amount(),
-                                    intent.currency(), a.pspReference(), Instant.now())))
+                                    intent.currency(), a.pspReference(), Instant.now()))
+                            .doOnSuccess(v -> meters.counter("booking.funnel", "stage", "pay").increment()))
                     .as(tx::transactional);
             case Declined d -> payments.transition(intent.id(), Status.PENDING, Status.FAILED, null, d.reason())
                     .flatMap(rows -> rows == 0 ? Mono.<Void>empty() : outbox.append(Topics.PAYMENT_FAILED,

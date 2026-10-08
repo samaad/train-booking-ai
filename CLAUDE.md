@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** Phases 0–5 built. Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Not yet: React/mobile frontends, Kafka Streams + observability (Phase 6), K8s (Phase 7), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** Phases 0–6 built. Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Phase 6 (Kafka Streams seat availability, OTel tracing to Tempo across the AI seam and Kafka, custom metrics, Grafana dashboards, ECS logs) verified in compose. Not yet: React/mobile frontends, K8s (Phase 7), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -53,6 +53,16 @@ These were verified against Maven Central and bytecode, and are costly to redisc
 - Topics are declared per service (`TopicDeclarations`) — the broker has auto-create off.
 - MongoDB in Boot 4: set `spring.mongodb.representation.uuid: standard` before storing `UUID` ids.
 - Don't run the full build while the compose `services` stack is up: Testcontainers starves (Ryuk timeouts, 16-min container starts).
+
+### Observability and Streams (Phase 6) — conventions
+
+- Every service does `spring.config.import: classpath:train-booking-observability.yml` (in common-core): histograms, sampling, `spring.reactor.context-propagation: auto`, and Kafka template/listener observations. Tracing is `spring-boot-starter-opentelemetry` → otel-collector (4318) → Tempo 2.10.8. The endpoint is set **only** via `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT`.
+- Trace context crosses the outbox through its `headers` jsonb column (`TraceContext.capture()` / `within()`). Postgres services add `r2dbc-proxy` to get DB spans.
+- common-web registers a `SpanExportingPredicate` that drops root-level `query` spans (background pollers otherwise flood Tempo). **An `ObservationPredicate` cannot do this**: r2dbc-proxy sets the observation's name (null at predicate time) and parent only after predicates run.
+- Never name a counter `*.created`: Prometheus reserves the `_created` suffix and the series silently disappears (hence `seat.hold.placed`).
+- Logs are ECS JSON (`LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs`). Trace ids are flat top-level `traceId`/`spanId` keys.
+- `seat-availability-streams` (`streams/`, servlet + virtual threads, `exactly_once_v2`) must declare its **source** topics as `NewTopic`s too, or startup dies with `MissingSourceTopicException`. Its output is the compacted `seat.availability.v1`, plus `GET /occupancy/{train}/{date}` and the WebSocket `/ws/seat-map`.
+- AI `PriceGuard` only trusts money-named JSON fields (`amount|price|fare|total|cost`): digits inside UUIDs or dates must never vouch for a quoted price.
 
 ### Spring AI 2.0.1 — verified from sources
 
@@ -115,18 +125,19 @@ Consequences that must hold in code:
 - **36 GB RAM / 12 CPU.** gemma4 alone is ~9.6 GB — use Docker Compose **profiles**, never run `full` alongside several JVMs.
 - **Docker Desktop is capped at ~8 GB** — `full` (~9 GB) does not fit. Every container has a `mem_limit`.
 - Host port 5432 is taken by an unrelated `postgres_db` container — `infra/.env` (gitignored) sets `POSTGRES_PORT=5433`. Don't stop that container.
-- Compose: `./mvnw -q package -DskipTests`, then `docker compose -f infra/docker-compose.yml --profile <service>|services up -d --build --wait`. A service profile pulls in the infra it needs; `services` starts all seven (~3.5 GB of JVMs). Images copy the host-built jar.
+- Compose: **`./mvnw -q clean package -DskipTests`** (without `clean`, Boot repackage skips the up-to-date fat jars and images ship a stale common-lib), then `docker compose -f infra/docker-compose.yml --profile <service>|services up -d --build --wait`. A service profile pulls in the infra it needs; `services` starts all seven (~3.5 GB of JVMs). Images copy the host-built jar.
+- Host port 8088 is the user's own ksqlDB — leave it alone. s3mock is on host 9190 (Prometheus has 9090).
 - Run services from the IDE against compose infra with `DB_PORT=5433` (see the postgres_db note above).
 - No kubectl context configured — K8s manifests are authoring-only, not deployable here.
 
 ## Repo conventions
 
-- Layout: `common-lib/{common-core,common-web}` (plain jars), `services/*` (bootable), `infra/` (compose, init scripts, Kong, Prometheus/Grafana).
+- Layout: `common-lib/*` (plain jars), `services/*` (bootable), `streams/*` (Kafka Streams apps, blocking, isolated), `infra/` (compose, init scripts, Kong, Prometheus/Grafana).
 - AI service: `POST /chat` (SSE events: conversation, token, tool, confirmation, warning, fallback, error, done), `GET /conversations`, `GET /conversations/{id}/messages`; Kong `/api/assistant`. Compose profile `assistant`.
-- Ports: catalog 8081, inventory 8082, booking 8083, payment 8084, ticketing 8085, notification 8086, user-profile 8087, ai-assistant 8080. Kong proxy 8000, Keycloak 8180, kafka-ui 8090.
+- Ports: catalog 8081, inventory 8082, booking 8083, payment 8084, ticketing 8085, notification 8086, user-profile 8087, seat-availability-streams 8089, ai-assistant 8080. Prometheus 9090, Grafana 3000, Tempo 3200. Kong proxy 8000, Keycloak 8180, kafka-ui 8090.
 - `common-core` stays framework-free (ids, `DomainException`, `IdempotencyKey`, `RequestFingerprint`). `common-web` auto-configures RFC 9457 problem+json error mapping — throw `DomainException` with an `UPPER_SNAKE` code rather than building error responses by hand. Use `IdempotencyKeyHeader` for the header and `RemoteCallErrors.from(service)` in `onErrorMap` on every inter-service call.
 - Mutating endpoints take `Idempotency-Key`; store key + `RequestFingerprint` with a UNIQUE constraint; replay returns the original 201, a reused key with a different body is 422. State transitions are single conditional UPDATEs (`WHERE status = … AND version = …`), never read-modify-write.
-- Kong routes: `/api/{catalog,inventory,booking,payment,ticketing,profile,assistant}/…` (prefix stripped). notification has no public API.
+- Kong routes: `/api/{catalog,inventory,booking,payment,ticketing,profile,assistant,availability}/…` (prefix stripped). notification has no public API.
 
 - Maven multi-module monorepo; parent POM is `<packaging>pom</packaging>` with **no `src/`** (a parent POM cannot carry sources).
 - `spring-boot-maven-plugin` belongs in `<pluginManagement>`, not `<plugins>` — otherwise `common-lib` is repackaged into a non-importable fat jar.

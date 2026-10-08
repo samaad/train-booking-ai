@@ -1,0 +1,36 @@
+spring:
+  config:
+    import: classpath:train-booking-observability.yml
+  application:
+    name: seat-availability-streams
+  threads:
+    virtual:
+      enabled: true # servlet stack: blocking store queries are fine here, the event loop lives elsewhere
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    streams:
+      application-id: seat-availability-streams
+      state-dir: ${STREAMS_STATE_DIR:${java.io.tmpdir}/seat-availability-streams}
+      properties:
+        # The changelog, the output topic and consumed offsets commit atomically.
+        processing.guarantee: exactly_once_v2
+        # Give the three input topics a moment to line up by timestamp before processing.
+        max.task.idle.ms: 200
+        commit.interval.ms: 200
+
+server:
+  port: ${PORT:8089}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

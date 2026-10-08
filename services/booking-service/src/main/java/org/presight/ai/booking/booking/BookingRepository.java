@@ -1,5 +1,7 @@
 package org.presight.ai.booking.booking;
 
+import io.r2dbc.spi.Parameters;
+import io.r2dbc.spi.R2dbcType;
 import io.r2dbc.spi.Readable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -71,7 +73,7 @@ class BookingRepository {
                         """)
                 .bind("id", id)
                 .bind("version", expectedVersion)
-                .bind("reason", io.r2dbc.spi.Parameters.in(io.r2dbc.spi.R2dbcType.VARCHAR, reason))
+                .bind("reason", Parameters.in(R2dbcType.VARCHAR, reason))
                 .fetch()
                 .rowsUpdated();
     }
@@ -91,7 +93,7 @@ class BookingRepository {
                 .bind("from", from.name())
                 .bind("to", to.name())
                 .bind("status", status.name())
-                .bind("reason", io.r2dbc.spi.Parameters.in(io.r2dbc.spi.R2dbcType.VARCHAR, cancelReason))
+                .bind("reason", Parameters.in(R2dbcType.VARCHAR, cancelReason))
                 .fetch()
                 .rowsUpdated();
     }

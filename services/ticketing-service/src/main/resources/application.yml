@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: classpath:train-booking-observability.yml
   application:
     name: ticketing-service
   r2dbc:
@@ -40,7 +42,7 @@ ticketing:
   # HMAC key for QR tokens (>= 32 bytes). The default is for local development only.
   qr-secret: ${TICKET_QR_SECRET:local-dev-only-qr-secret-change-me-0123456789}
   object-store:
-    endpoint: ${OBJECT_STORE_URL:http://localhost:9090}
+    endpoint: ${OBJECT_STORE_URL:http://localhost:9190}
     region: ${OBJECT_STORE_REGION:me-central-1}
     bucket: ${OBJECT_STORE_BUCKET:tickets}
     access-key: ${OBJECT_STORE_ACCESS_KEY:local}

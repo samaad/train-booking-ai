@@ -67,6 +67,11 @@
             <artifactId>resilience4j-bulkhead</artifactId>
         </dependency>
 
+        <!-- Micrometer Tracing → OpenTelemetry → OTLP (collector → Tempo). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-opentelemetry</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>

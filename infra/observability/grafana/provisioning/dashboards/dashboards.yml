@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: train-booking
+    folder: Train Booking
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: classpath:train-booking-observability.yml
   application:
     name: user-profile-service
   r2dbc:

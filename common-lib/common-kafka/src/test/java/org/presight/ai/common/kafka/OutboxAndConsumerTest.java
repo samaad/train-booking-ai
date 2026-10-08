@@ -85,10 +85,12 @@ class OutboxAndConsumerTest {
     @BeforeEach
     void setUp() throws Exception {
         if (!schema) {
-            String ddl = new ClassPathResource("db/outbox/V1000__outbox_and_processed_events.sql").getContentAsString(StandardCharsets.UTF_8);
-            for (String statement : ddl.replaceAll("(?m)^--.*$", "").split(";")) {
-                if (!statement.isBlank()) {
-                    db.sql(statement).then().block();
+            for (String migration : List.of("V1000__outbox_and_processed_events.sql", "V1001__outbox_headers.sql")) {
+                String ddl = new ClassPathResource("db/outbox/" + migration).getContentAsString(StandardCharsets.UTF_8);
+                for (String statement : ddl.replaceAll("(?m)^--.*$", "").split(";")) {
+                    if (!statement.isBlank()) {
+                        db.sql(statement).then().block();
+                    }
                 }
             }
             db.sql("CREATE TABLE effects (n int)").then().block();
@@ -99,7 +101,8 @@ class OutboxAndConsumerTest {
         }
         db.sql("DELETE FROM outbox").then().block();
         tx = TransactionalOperator.create(txManager);
-        relay = new OutboxRelay(db, tx, kafka, Duration.ofSeconds(1), 100);
+        relay = new OutboxRelay(db, tx, kafka, Duration.ofSeconds(1), 100,
+                org.presight.ai.common.kafka.outbox.TraceContext.NONE, json);
     }
 
     @Test

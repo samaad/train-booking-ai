@@ -1,5 +1,7 @@
 package org.presight.ai.ticketing.ticket;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.presight.ai.common.kafka.TopicDeclarations;
@@ -24,10 +26,12 @@ class BookingEventsListener {
 
     private final TicketService tickets;
     private final IdempotentHandler handler;
+    private final Counter voids;
 
-    BookingEventsListener(TicketService tickets, IdempotentHandler handler) {
+    BookingEventsListener(TicketService tickets, IdempotentHandler handler, MeterRegistry meters) {
         this.tickets = tickets;
         this.handler = handler;
+        this.voids = meters.counter("saga.compensation", "type", "ticket_void");
     }
 
     @KafkaListener(topics = Topics.BOOKING_CONFIRMED)
@@ -39,7 +43,7 @@ class BookingEventsListener {
 
     @KafkaListener(topics = Topics.BOOKING_CANCELLED)
     void onBookingCancelled(ConsumerRecord<String, String> record) {
-        handler.handle(record, BookingCancelled.class, e -> tickets.voidTicket(e.bookingId()));
+        handler.handle(record, BookingCancelled.class, e -> tickets.voidTicket(e.bookingId()).doOnSuccess(v -> voids.increment()));
     }
 
     @Configuration(proxyBeanMethods = false)

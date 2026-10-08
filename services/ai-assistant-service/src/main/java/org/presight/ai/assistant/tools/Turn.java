@@ -86,10 +86,10 @@ public final class Turn {
         toolResultsJson.add(json);
     }
 
-    /** All tool results of this turn, for the price guardrail. */
-    public String toolResults() {
+    /** All tool results of this turn (JSON documents), for the price guardrail. */
+    public List<String> toolResults() {
         synchronized (toolResultsJson) {
-            return String.join("\n", toolResultsJson);
+            return List.copyOf(toolResultsJson);
         }
     }
 

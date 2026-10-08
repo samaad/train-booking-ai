@@ -21,6 +21,8 @@ public final class Topics {
     public static final String SEAT_HELD = "seat.held.v1";
     public static final String SEAT_RELEASED = "seat.released.v1";
     public static final String SEAT_COMMITTED = "seat.committed.v1";
+    /** Kafka Streams output: per train-date seat map, compacted (latest state per key). */
+    public static final String SEAT_AVAILABILITY = "seat.availability.v1";
     public static final String TICKET_ISSUED = "ticket.issued.v1";
     public static final String TICKET_VOIDED = "ticket.voided.v1";
     public static final String PROFILE_UPDATED = "profile.updated.v1";
@@ -41,6 +43,7 @@ public final class Topics {
             spec(SEAT_HELD, 24, Duration.ofDays(1)),
             spec(SEAT_RELEASED, 24, Duration.ofDays(1)),
             spec(SEAT_COMMITTED, 24, Duration.ofDays(7)),
+            Map.entry(SEAT_AVAILABILITY, new TopicSpec(SEAT_AVAILABILITY, 24, null)),
             spec(TICKET_ISSUED, 12, Duration.ofDays(90)),
             spec(TICKET_VOIDED, 12, Duration.ofDays(90)),
             spec(PROFILE_UPDATED, 6, Duration.ofDays(7)),

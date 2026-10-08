@@ -2,10 +2,13 @@ package org.presight.ai.common.kafka;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import java.time.Duration;
 import org.presight.ai.common.kafka.consumer.IdempotentHandler;
 import org.presight.ai.common.kafka.outbox.Outbox;
 import org.presight.ai.common.kafka.outbox.OutboxRelay;
+import org.presight.ai.common.kafka.outbox.TraceContext;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -33,8 +36,16 @@ import tools.jackson.databind.json.JsonMapper;
 public class OutboxAutoConfiguration {
 
     @Bean
-    Outbox outbox(DatabaseClient db, JsonMapper json) {
-        return new Outbox(db, json);
+    TraceContext outboxTraceContext(ObjectProvider<Tracer> tracer,
+                                    ObjectProvider<Propagator> propagator) {
+        var t = tracer.getIfAvailable();
+        var p = propagator.getIfAvailable();
+        return t != null && p != null ? TraceContext.of(t, p) : TraceContext.NONE;
+    }
+
+    @Bean
+    Outbox outbox(DatabaseClient db, JsonMapper json, TraceContext traces) {
+        return new Outbox(db, json, traces);
     }
 
     @Bean
@@ -42,8 +53,8 @@ public class OutboxAutoConfiguration {
     OutboxRelay outboxRelay(DatabaseClient db, ReactiveTransactionManager txManager, KafkaTemplate<String, String> kafka,
                             @Value("${outbox.relay.interval:200ms}") Duration interval,
                             @Value("${outbox.relay.batch-size:100}") int batchSize,
-                            ObjectProvider<MeterRegistry> meters) {
-        OutboxRelay relay = new OutboxRelay(db, TransactionalOperator.create(txManager), kafka, interval, batchSize);
+                            ObjectProvider<MeterRegistry> meters, TraceContext traces, JsonMapper json) {
+        OutboxRelay relay = new OutboxRelay(db, TransactionalOperator.create(txManager), kafka, interval, batchSize, traces, json);
         meters.ifAvailable(registry -> Gauge.builder("outbox.lag", relay, OutboxRelay::lagSeconds)
                 .description("Age of the oldest unpublished event — page on this")
                 .baseUnit("seconds")

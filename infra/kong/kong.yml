@@ -64,6 +64,14 @@ services:
         strip_path: true
         response_buffering: false # SSE chat: stream tokens through as they arrive
 
+  - name: seat-availability-streams
+    url: http://host.docker.internal:8089
+    routes:
+      - name: availability
+        paths: ["/api/availability"] # GET /occupancy/{train}/{date}, WS /ws/seat-map
+        protocols: [http, https]
+        strip_path: true
+
 plugins:
   - name: rate-limiting
     config:
