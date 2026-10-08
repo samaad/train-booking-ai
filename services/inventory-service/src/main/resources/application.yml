@@ -11,6 +11,13 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/inventory
     user: ${DB_USER:inventory}
     password: ${DB_PASSWORD:inventory}
+    locations: classpath:db/migration,classpath:db/outbox
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: inventory-service
+    listener:
+      ack-mode: record
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -28,6 +35,11 @@ inventory:
   contention-filter:
     enabled: true
     lock-ttl: 2s
+  # 03-consistency: the sweeper is the total guarantee for expiry (the UPDATE's self-healing clause only
+  # reclaims a seat when someone contends for it).
+  sweeper:
+    interval: 30s
+    batch-size: 100
   # Seat layout per train and fare class. Train numbers and fare classes must match
   # catalog-service's seed data; seats are materialised lazily per travel date.
   trains:

@@ -21,6 +21,9 @@ final class DownstreamStub {
     volatile String journeysJson = "[]";
     volatile String fareRulesJson = "[]";
     volatile boolean inventoryDown;
+    /** Holds whose commit should fail with 409 HOLD_EXPIRED (lapsed before payment arrived). */
+    final java.util.Set<UUID> expiredOnCommit = ConcurrentHashMap.newKeySet();
+    final java.util.Set<UUID> committed = ConcurrentHashMap.newKeySet();
 
     private final DisposableServer server = HttpServer.create()
             .port(0)
@@ -33,6 +36,16 @@ final class DownstreamStub {
                         return hold != null
                                 ? json(res, HttpResponseStatus.OK, hold)
                                 : problem(res, 404, "HOLD_NOT_FOUND", "No hold " + req.param("id"));
+                    })
+                    .post("/holds/{id}/commit", (req, res) -> {
+                        UUID id = UUID.fromString(req.param("id"));
+                        if (expiredOnCommit.contains(id)) {
+                            return problem(res, 409, "HOLD_EXPIRED", "Hold " + id + " has expired");
+                        }
+                        committed.add(id);
+                        String hold = holds.get(id);
+                        return hold != null ? json(res, HttpResponseStatus.OK, hold.replace("ACTIVE", "COMMITTED"))
+                                : problem(res, 404, "HOLD_NOT_FOUND", "No hold " + id);
                     })
                     .get("/routes/search", (req, res) -> {
                         // Strict like the real catalog: required params, ISO date — or 400.

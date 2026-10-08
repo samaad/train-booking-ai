@@ -11,6 +11,7 @@ public record Booking(
         String pnr,
         UUID holdId,
         Status status,
+        SagaState sagaState,
         String trainNumber,
         LocalDate travelDate,
         String fareClass,
@@ -28,6 +29,9 @@ public record Booking(
         long version,
         Instant createdAt) {
 
-    /** The saga state. CONFIRMED is reached once payment is authorised (wired with events). */
+    /** Customer-facing status. */
     public enum Status { PENDING_PAYMENT, CONFIRMED, CANCELLED }
+
+    /** Internal choreographed-saga state (03-consistency): PAYMENT_PENDING → SEATS_COMMITTED → TICKETED, or CANCELLED. */
+    public enum SagaState { PAYMENT_PENDING, SEATS_COMMITTED, TICKETED, CANCELLED }
 }

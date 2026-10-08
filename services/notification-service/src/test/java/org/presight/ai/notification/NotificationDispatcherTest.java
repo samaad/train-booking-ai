@@ -22,14 +22,21 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.mongodb.MongoDBContainer;
 
 @SpringBootTest
 @Import(NotificationDispatcherTest.Containers.class)
-class NotificationDispatcherTest {
+public class NotificationDispatcherTest {
 
     @TestConfiguration(proxyBeanMethods = false)
-    static class Containers {
+    public static class Containers {
+        @Bean
+        @ServiceConnection
+        KafkaContainer kafka() {
+            return new KafkaContainer("apache/kafka:4.3.1");
+        }
+
         @Bean
         @ServiceConnection
         MongoDBContainer mongo() {

@@ -17,7 +17,11 @@ public record InventoryProperties(
         Duration bookingHorizon,
         ZoneId zone,
         ContentionFilter contentionFilter,
+        Sweeper sweeper,
         Map<String, Map<String, SeatBlock>> trains) {
+
+    public record Sweeper(Duration interval, int batchSize) {
+    }
 
     public record ContentionFilter(boolean enabled, Duration lockTtl) {
     }

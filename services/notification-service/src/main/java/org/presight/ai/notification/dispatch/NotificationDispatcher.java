@@ -26,7 +26,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * Fans one source event out to every channel the recipient has an address for. This is the entry
- * point for the booking/payment/ticket consumers wired in the events pass.
+ * point for the booking/payment/ticket consumers (events.EventsListener).
  *
  * <p>Idempotent per (eventId, channel): the PENDING record is inserted first and the unique index
  * turns a redelivered event into a no-op, so nobody gets the same SMS twice.

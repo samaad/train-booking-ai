@@ -11,6 +11,9 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/profile
     user: ${DB_USER:profile}
     password: ${DB_PASSWORD:profile}
+    locations: classpath:db/migration,classpath:db/outbox
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
   security:
     oauth2:
       resourceserver:

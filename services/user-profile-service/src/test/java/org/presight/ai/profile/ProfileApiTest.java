@@ -7,6 +7,9 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.presight.ai.common.kafka.Topics;
+import org.presight.ai.common.kafka.events.OtherEvents.ProfileUpdated;
+import org.presight.ai.common.kafka.testing.KafkaTestSupport;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -17,15 +20,22 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(ProfileApiTest.Containers.class)
-class ProfileApiTest {
+public class ProfileApiTest {
 
     @TestConfiguration(proxyBeanMethods = false)
-    static class Containers {
+    public static class Containers {
+        @Bean
+        @ServiceConnection
+        KafkaContainer kafka() {
+            return new KafkaContainer("apache/kafka:4.3.1");
+        }
+
         @Bean
         @ServiceConnection
         PostgreSQLContainer postgres() {
@@ -48,6 +58,9 @@ class ProfileApiTest {
 
     @Autowired
     WebTestClient client;
+
+    @Autowired
+    KafkaContainer kafka;
 
     @Test
     void everythingButHealthRequiresAToken() {
@@ -96,6 +109,21 @@ class ProfileApiTest {
         bob.put().uri("/me").bodyValue(update(version, "AISLE")).exchange()
                 .expectStatus().isEqualTo(409)
                 .expectBody().jsonPath("$.code").isEqualTo("STALE_PROFILE");
+    }
+
+    @Test
+    void anUpdatePublishesProfileUpdated() {
+        String subject = "frank-" + UUID.randomUUID();
+        WebTestClient frank = as(subject, "Frank", "frank@example.com");
+        int version = ((Number) frank.get().uri("/me").exchange()
+                .expectBody(Map.class).returnResult().getResponseBody().get("version")).intValue();
+        frank.put().uri("/me").bodyValue(update(version, "AISLE")).exchange().expectStatus().isOk();
+
+        try (KafkaTestSupport events = new KafkaTestSupport(kafka.getBootstrapServers(), java.util.List.of(Topics.PROFILE_UPDATED))) {
+            ProfileUpdated e = events.await(Topics.PROFILE_UPDATED, ProfileUpdated.class, u -> u.userId().equals(subject),
+                    java.time.Duration.ofSeconds(20));
+            assertThat(e.version()).isEqualTo(version + 1);
+        }
     }
 
     @Test

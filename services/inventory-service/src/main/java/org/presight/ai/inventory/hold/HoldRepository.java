@@ -159,6 +159,27 @@ class HoldRepository {
                 .rowsUpdated();
     }
 
+    /** Cancellation compensation: frees the seat this hold owns, held or committed. */
+    Mono<Long> releaseSeatHeldOrCommitted(UUID holdId) {
+        return db.sql("""
+                        UPDATE seat_inventory
+                        SET status = 'AVAILABLE', hold_id = NULL, hold_expires_at = NULL, version = version + 1
+                        WHERE hold_id = :holdId AND status IN ('HELD', 'COMMITTED')
+                        """)
+                .bind("holdId", holdId)
+                .fetch()
+                .rowsUpdated();
+    }
+
+    /** Lapsed ACTIVE holds, locked so concurrent sweepers take disjoint batches. Call inside a transaction. */
+    reactor.core.publisher.Flux<Hold> lockExpired(int limit) {
+        return db.sql("SELECT " + HOLD_COLUMNS + " FROM seat_hold WHERE status = 'ACTIVE' AND expires_at < now() "
+                        + "ORDER BY expires_at LIMIT :limit FOR UPDATE SKIP LOCKED")
+                .bind("limit", limit)
+                .map(HoldRepository::hold)
+                .all();
+    }
+
     Mono<Long> updateStatus(UUID holdId, HoldStatus status) {
         return db.sql("UPDATE seat_hold SET status = :status, updated_at = now() WHERE id = :id")
                 .bind("status", status.name())

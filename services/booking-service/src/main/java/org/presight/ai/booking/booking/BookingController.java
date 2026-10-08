@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import org.presight.ai.booking.booking.Booking.SagaState;
 import org.presight.ai.booking.booking.Booking.Status;
 import org.presight.ai.booking.booking.BookingService.CreateBooking;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
@@ -47,13 +48,13 @@ public class BookingController {
     }
 
     public record BookingResponse(
-            UUID bookingId, String pnr, Status status, UUID holdId,
+            UUID bookingId, String pnr, Status status, SagaState sagaState, UUID holdId,
             String trainNumber, LocalDate travelDate, String fareClass, String seatNo,
             String fromStation, String toStation, OffsetDateTime departure, OffsetDateTime arrival,
             String passengerName, BigDecimal amount, String currency, String cancelReason, Instant createdAt) {
 
         static BookingResponse of(Booking b) {
-            return new BookingResponse(b.id(), b.pnr(), b.status(), b.holdId(),
+            return new BookingResponse(b.id(), b.pnr(), b.status(), b.sagaState(), b.holdId(),
                     b.trainNumber(), b.travelDate(), b.fareClass(), b.seatNo(),
                     b.fromStation(), b.toStation(), b.departure(), b.arrival(),
                     b.passengerName(), b.amount(), b.currency(), b.cancelReason(), b.createdAt());

@@ -11,6 +11,13 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/ticketing
     user: ${DB_USER:ticketing}
     password: ${DB_PASSWORD:ticketing}
+    locations: classpath:db/migration,classpath:db/outbox
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: ticketing-service
+    listener:
+      ack-mode: record
 
 server:
   port: ${PORT:8085}

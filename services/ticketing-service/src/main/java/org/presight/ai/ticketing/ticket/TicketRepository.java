@@ -18,8 +18,8 @@ class TicketRepository {
         this.db = db;
     }
 
-    /** Inserts unless the booking already has a ticket; either way returns the booking's ticket. */
-    Mono<Ticket> insertIfAbsent(Ticket t) {
+    /** Inserts unless the booking already has a ticket; emits whether a row was inserted. */
+    Mono<Boolean> insertIfAbsent(Ticket t) {
         return db.sql("""
                         INSERT INTO ticket (id, pnr, booking_id, status, passenger_name, train_number, travel_date,
                                             fare_class, seat_no, from_station, to_station, departure, qr_token)
@@ -39,8 +39,21 @@ class TicketRepository {
                 .bind("to", t.toStation())
                 .bind("departure", t.departure())
                 .bind("qr", t.qrToken())
-                .then()
-                .then(findByBookingId(t.bookingId()));
+                .fetch()
+                .rowsUpdated()
+                .map(rows -> rows == 1);
+    }
+
+    Mono<Void> recordCancellation(UUID bookingId) {
+        return db.sql("INSERT INTO cancelled_booking (booking_id) VALUES (:id) ON CONFLICT DO NOTHING")
+                .bind("id", bookingId).then();
+    }
+
+    Mono<Boolean> isCancelled(UUID bookingId) {
+        return db.sql("SELECT EXISTS (SELECT 1 FROM cancelled_booking WHERE booking_id = :id) AS cancelled")
+                .bind("id", bookingId)
+                .map(r -> Boolean.TRUE.equals(r.get("cancelled", Boolean.class)))
+                .one();
     }
 
     Mono<Ticket> findByPnr(String pnr) {

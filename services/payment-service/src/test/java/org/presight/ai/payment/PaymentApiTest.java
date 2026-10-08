@@ -20,16 +20,18 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.r2dbc.core.DatabaseClient;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import reactor.core.publisher.Mono;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(PaymentApiTest.Config.class)
-class PaymentApiTest {
+public class PaymentApiTest {
 
     /** A PSP that honours idempotency keys, can be taken down, and counts real charges. */
-    static class FakePsp implements PaymentGateway {
+    public static class FakePsp implements PaymentGateway {
         volatile boolean down;
         final Set<UUID> charged = ConcurrentHashMap.newKeySet();
         final AtomicInteger authorizeCalls = new AtomicInteger();
@@ -54,7 +56,7 @@ class PaymentApiTest {
     }
 
     @TestConfiguration(proxyBeanMethods = false)
-    static class Config {
+    public static class Config {
         @Bean
         @ServiceConnection
         PostgreSQLContainer postgres() {
@@ -66,6 +68,12 @@ class PaymentApiTest {
         FakePsp fakePsp() {
             return new FakePsp();
         }
+
+        @Bean
+        @ServiceConnection
+        KafkaContainer kafka() {
+            return new KafkaContainer("apache/kafka:4.3.1");
+        }
     }
 
     @Autowired
@@ -73,6 +81,9 @@ class PaymentApiTest {
 
     @Autowired
     FakePsp psp;
+
+    @Autowired
+    DatabaseClient db;
 
     @BeforeEach
     void pspUp() {
@@ -93,7 +104,10 @@ class PaymentApiTest {
                 .expectBody(Map.class).returnResult().getResponseBody();
         assertThat(replay.get("paymentId")).isEqualTo(first.get("paymentId"));
 
-        pay(booking, "999.00", "tok_visa", key).expectStatus().isEqualTo(422)
+        client.post().uri("/payments").header("Idempotency-Key", key)
+                .bodyValue(Map.of("bookingId", booking.toString(), "amount", new BigDecimal("999.00"),
+                        "currency", "AED", "paymentToken", "tok_visa"))
+                .exchange().expectStatus().isEqualTo(422)
                 .expectBody().jsonPath("$.code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
     }
 
@@ -163,7 +177,10 @@ class PaymentApiTest {
         pay(UUID.randomUUID(), "0.00", "tok_visa", key()).expectStatus().isBadRequest();
     }
 
+    /** booking.created normally creates the charge; seeded directly here, the event path is tested separately. */
     private WebTestClient.ResponseSpec pay(UUID booking, String amount, String token, String key) {
+        db.sql("INSERT INTO booking_charge (booking_id, amount, currency) VALUES (:id, :amount, 'AED') ON CONFLICT DO NOTHING")
+                .bind("id", booking).bind("amount", new BigDecimal(amount).max(new BigDecimal("0.01"))).then().block();
         return client.post().uri("/payments").header("Idempotency-Key", key)
                 .bodyValue(Map.of("bookingId", booking.toString(), "amount", new BigDecimal(amount),
                         "currency", "AED", "paymentToken", token))

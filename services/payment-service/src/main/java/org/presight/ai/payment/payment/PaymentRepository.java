@@ -70,6 +70,46 @@ class PaymentRepository {
                 .rowsUpdated();
     }
 
+    record Charge(UUID bookingId, BigDecimal amount, String currency, boolean cancelled) {
+    }
+
+    Mono<Void> upsertCharge(UUID bookingId, BigDecimal amount, String currency) {
+        return db.sql("""
+                        INSERT INTO booking_charge (booking_id, amount, currency) VALUES (:id, :amount, :currency)
+                        ON CONFLICT (booking_id) DO NOTHING
+                        """)
+                .bind("id", bookingId)
+                .bind("amount", amount)
+                .bind("currency", currency)
+                .then();
+    }
+
+    Mono<Charge> findCharge(UUID bookingId) {
+        return db.sql("SELECT * FROM booking_charge WHERE booking_id = :id")
+                .bind("id", bookingId)
+                .map(r -> new Charge(r.get("booking_id", UUID.class), r.get("amount", BigDecimal.class),
+                        r.get("currency", String.class), "CANCELLED".equals(r.get("status", String.class))))
+                .one();
+    }
+
+    /** A tombstone if booking.created has not arrived yet: the late event then finds the booking cancelled. */
+    Mono<Void> cancelCharge(UUID bookingId) {
+        return db.sql("""
+                        INSERT INTO booking_charge (booking_id, status) VALUES (:id, 'CANCELLED')
+                        ON CONFLICT (booking_id) DO UPDATE SET status = 'CANCELLED', updated_at = now()
+                        """)
+                .bind("id", bookingId)
+                .then();
+    }
+
+    /** The booking's non-failed payment, if any (at most one, by ux_payment_live_booking). */
+    Mono<PaymentIntent> findLiveByBooking(UUID bookingId) {
+        return db.sql("SELECT * FROM payment_intent WHERE booking_id = :id AND status <> 'FAILED'")
+                .bind("id", bookingId)
+                .map(PaymentRepository::intent)
+                .one();
+    }
+
     private static PaymentIntent intent(Readable row) {
         return new PaymentIntent(
                 row.get("id", UUID.class),

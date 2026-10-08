@@ -1,0 +1,2 @@
+org.presight.ai.common.kafka.KafkaEventsAutoConfiguration
+org.presight.ai.common.kafka.OutboxAutoConfiguration

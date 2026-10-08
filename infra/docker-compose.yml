@@ -29,6 +29,7 @@ x-service: &service
 
 x-service-env: &service-env
   JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+  KAFKA_BOOTSTRAP: kafka:29092
 
 # Each service reaches its own database by name; per-service credentials come from the
 # service's defaults (role = database name), created by postgres/init/01-databases.sh.
@@ -87,7 +88,7 @@ services:
   # ---------------------------------------------------------------- kafka (KRaft, no ZooKeeper)
   kafka:
     image: apache/kafka:4.3.1
-    profiles: [kafka, full]
+    profiles: [kafka, full, services, catalog, inventory, booking, payment, ticketing, notification, profile, assistant]
     ports: ["9092:9092"]
     environment:
       KAFKA_NODE_ID: 1
@@ -254,6 +255,7 @@ services:
       PORT: 8082
       REDIS_HOST: redis
     depends_on:
+      kafka: { condition: service_healthy }
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
@@ -269,6 +271,7 @@ services:
       INVENTORY_URL: http://inventory-service:8082
       CATALOG_URL: http://catalog-service:8081
     depends_on:
+      kafka: { condition: service_healthy }
       postgres: { condition: service_healthy }
 
   payment-service:
@@ -281,6 +284,7 @@ services:
       <<: [*service-env, *postgres-env]
       PORT: 8084
     depends_on:
+      kafka: { condition: service_healthy }
       postgres: { condition: service_healthy }
 
   ticketing-service:
@@ -294,6 +298,7 @@ services:
       PORT: 8085
       OBJECT_STORE_URL: http://s3mock:9090
     depends_on:
+      kafka: { condition: service_healthy }
       postgres: { condition: service_healthy }
       s3mock: { condition: service_started }
 
@@ -308,6 +313,7 @@ services:
       PORT: 8086
       MONGO_HOST: mongo
     depends_on:
+      kafka: { condition: service_healthy }
       mongo: { condition: service_healthy }
 
   user-profile-service:
@@ -323,6 +329,7 @@ services:
       OIDC_ISSUER: http://localhost:8180/realms/train-booking
       OIDC_JWKS: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
     depends_on:
+      kafka: { condition: service_healthy }
       postgres: { condition: service_healthy }
 
   # The one blocking-with-offload service. Ollama runs on the HOST (Metal GPU), never in Docker:

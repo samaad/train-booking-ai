@@ -19,8 +19,10 @@ class Templates {
                     "Your booking {pnr} on {trainNumber} ({from} to {to}) on {travelDate} is confirmed. Seat {seatNo}."),
             "booking.cancelled.v1", new Template("Booking {pnr} cancelled",
                     "Your booking {pnr} has been cancelled. Any payment will be refunded."),
+            "payment.refunded.v1", new Template("Refund for {pnr}",
+                    "We have refunded {amount} {currency} for booking {pnr}."),
             "payment.failed.v1", new Template("Payment for {pnr} failed",
-                    "We could not take payment for booking {pnr}. Your seat is held until {holdExpiresAt}."),
+                    "We could not take payment for booking {pnr}, so it has been cancelled and the seat released."),
             "ticket.issued.v1", new Template("Your ticket for {pnr}",
                     "Your ticket for booking {pnr} is ready. Show the QR code at the gate."));
 

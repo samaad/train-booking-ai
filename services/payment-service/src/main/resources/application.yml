@@ -11,6 +11,13 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/payment
     user: ${DB_USER:payment}
     password: ${DB_PASSWORD:payment}
+    locations: classpath:db/migration,classpath:db/outbox
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: payment-service
+    listener:
+      ack-mode: record
 
 server:
   port: ${PORT:8084}

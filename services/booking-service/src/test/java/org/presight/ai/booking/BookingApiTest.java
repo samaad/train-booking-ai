@@ -19,19 +19,26 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(BookingApiTest.Containers.class)
-class BookingApiTest {
+public class BookingApiTest {
 
     @TestConfiguration(proxyBeanMethods = false)
-    static class Containers {
+    public static class Containers {
         @Bean
         @ServiceConnection
         PostgreSQLContainer postgres() {
             return new PostgreSQLContainer("postgres:18.6-alpine");
+        }
+
+        @Bean
+        @ServiceConnection
+        KafkaContainer kafka() {
+            return new KafkaContainer("apache/kafka:4.3.1");
         }
     }
 

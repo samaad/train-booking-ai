@@ -1,12 +1,19 @@
 package org.presight.ai.inventory.hold;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 import org.presight.ai.common.error.DomainException;
 import org.presight.ai.common.id.UuidV7;
 import org.presight.ai.common.idempotency.IdempotencyKey;
 import org.presight.ai.common.idempotency.RequestFingerprint;
+import org.presight.ai.common.kafka.Topics;
+import org.presight.ai.common.kafka.events.SeatEvents.ReleaseReason;
+import org.presight.ai.common.kafka.events.SeatEvents.SeatCommitted;
+import org.presight.ai.common.kafka.events.SeatEvents.SeatHeld;
+import org.presight.ai.common.kafka.events.SeatEvents.SeatReleased;
+import org.presight.ai.common.kafka.outbox.Outbox;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
 import org.presight.ai.inventory.availability.SeatLayout;
 import org.presight.ai.inventory.config.InventoryProperties;
@@ -25,14 +32,16 @@ public class HoldService {
     private final SeatLayout layout;
     private final SeatContentionFilter contentionFilter;
     private final TransactionalOperator tx;
+    private final Outbox outbox;
     private final Duration holdTtl;
 
     HoldService(HoldRepository holds, SeatLayout layout, SeatContentionFilter contentionFilter,
-                TransactionalOperator tx, InventoryProperties properties) {
+                TransactionalOperator tx, Outbox outbox, InventoryProperties properties) {
         this.holds = holds;
         this.layout = layout;
         this.contentionFilter = contentionFilter;
         this.tx = tx;
+        this.outbox = outbox;
         this.holdTtl = properties.holdTtl();
     }
 
@@ -67,6 +76,8 @@ public class HoldService {
                             .flatMap(rows -> rows == 0
                                     ? Mono.error(expired(holdId)) // lapsed between the lock and the update
                                     : holds.updateStatus(holdId, HoldStatus.COMMITTED))
+                            .then(outbox.append(Topics.SEAT_COMMITTED, new SeatCommitted(UuidV7.generate(), hold.id(),
+                                    hold.trainNumber(), hold.travelDate(), hold.fareClass(), hold.seatNo(), Instant.now())))
                             .then(holds.findById(holdId));
                 })
                 .as(tx::transactional);
@@ -81,10 +92,40 @@ public class HoldService {
                     case COMMITTED -> Mono.<Void>error(DomainException.conflict("HOLD_ALREADY_COMMITTED",
                             "Hold " + holdId + " is committed to a booking; cancel the booking instead"));
                     case ACTIVE, EXPIRED -> holds.releaseSeat(holdId)
+                            .flatMap(rows -> released(hold, rows, ReleaseReason.RELEASED))
                             .then(holds.updateStatus(holdId, HoldStatus.RELEASED))
                             .then();
                 })
                 .as(tx::transactional);
+    }
+
+    /**
+     * Compensation for {@code booking.cancelled.v1}: frees the seat whether it was still held or already
+     * committed to the now-cancelled booking. Idempotent; an unknown hold is a no-op (nothing to free).
+     */
+    public Mono<Void> releaseForCancelledBooking(UUID holdId) {
+        return holds.lockById(holdId)
+                .flatMap(hold -> hold.status() == HoldStatus.RELEASED
+                        ? Mono.<Void>empty()
+                        : holds.releaseSeatHeldOrCommitted(holdId)
+                                .flatMap(rows -> released(hold, rows, ReleaseReason.BOOKING_CANCELLED))
+                                .then(holds.updateStatus(holdId, HoldStatus.RELEASED))
+                                .then())
+                .as(tx::transactional);
+    }
+
+    /** Called by the sweeper inside its batch transaction. */
+    Mono<Void> expire(Hold hold) {
+        return holds.releaseSeat(hold.id())
+                .flatMap(rows -> released(hold, rows, ReleaseReason.EXPIRED))
+                .then(holds.updateStatus(hold.id(), HoldStatus.EXPIRED))
+                .then();
+    }
+
+    /** Emits seat.released only when a seat row actually changed (a lapsed hold's seat may belong to someone else now). */
+    private Mono<Void> released(Hold hold, long rows, ReleaseReason reason) {
+        return rows == 0 ? Mono.empty() : outbox.append(Topics.SEAT_RELEASED, new SeatReleased(UuidV7.generate(),
+                hold.id(), hold.trainNumber(), hold.travelDate(), hold.fareClass(), hold.seatNo(), reason, Instant.now()));
     }
 
     private Mono<Hold> claim(HoldCommand cmd, IdempotencyKey key, String fingerprint) {
@@ -98,6 +139,8 @@ public class HoldService {
 
         Mono<Hold> attempt = seat
                 .flatMap(s -> holds.insertHold(holdId, cmd.trainNumber(), cmd.travelDate(), s, key.value(), fingerprint))
+                .flatMap(h -> outbox.append(Topics.SEAT_HELD, new SeatHeld(UuidV7.generate(), h.id(), h.trainNumber(),
+                        h.travelDate(), h.fareClass(), h.seatNo(), h.expiresAt(), Instant.now())).thenReturn(h))
                 .as(tx::transactional);
 
         if (cmd.seatNo() != null) {

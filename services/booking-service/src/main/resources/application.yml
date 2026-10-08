@@ -11,6 +11,13 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/booking
     user: ${DB_USER:booking}
     password: ${DB_PASSWORD:booking}
+    locations: classpath:db/migration,classpath:db/outbox
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: booking-service
+    listener:
+      ack-mode: record
   http:
     clients:
       connect-timeout: 1s

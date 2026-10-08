@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import org.presight.ai.booking.booking.Booking.SagaState;
 import org.presight.ai.booking.booking.Booking.Status;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
@@ -63,12 +64,33 @@ class BookingRepository {
     Mono<Long> cancel(UUID id, long expectedVersion, String reason) {
         return db.sql("""
                         UPDATE booking
-                        SET status = 'CANCELLED', cancel_reason = :reason, version = version + 1, updated_at = now()
+                        SET status = 'CANCELLED', saga_state = 'CANCELLED', cancel_reason = :reason,
+                            version = version + 1, updated_at = now()
                         WHERE id = :id AND version = :version AND status <> 'CANCELLED'
                         """)
                 .bind("id", id)
                 .bind("version", expectedVersion)
-                .bind("reason", reason)
+                .bind("reason", io.r2dbc.spi.Parameters.in(io.r2dbc.spi.R2dbcType.VARCHAR, reason))
+                .fetch()
+                .rowsUpdated();
+    }
+
+    /**
+     * A saga step: moves {@code from → to} only if the booking is still in {@code from}. Zero rows means the
+     * event is stale or out of order (e.g. the user cancelled first) and the step must not apply.
+     */
+    Mono<Long> advance(UUID id, SagaState from, SagaState to, Status status, String cancelReason) {
+        return db.sql("""
+                        UPDATE booking
+                        SET saga_state = :to, status = :status, cancel_reason = COALESCE(:reason, cancel_reason),
+                            version = version + 1, updated_at = now()
+                        WHERE id = :id AND saga_state = :from
+                        """)
+                .bind("id", id)
+                .bind("from", from.name())
+                .bind("to", to.name())
+                .bind("status", status.name())
+                .bind("reason", io.r2dbc.spi.Parameters.in(io.r2dbc.spi.R2dbcType.VARCHAR, cancelReason))
                 .fetch()
                 .rowsUpdated();
     }
@@ -79,6 +101,7 @@ class BookingRepository {
                 row.get("pnr", String.class),
                 row.get("hold_id", UUID.class),
                 Status.valueOf(row.get("status", String.class)),
+                SagaState.valueOf(row.get("saga_state", String.class)),
                 row.get("train_number", String.class),
                 row.get("travel_date", LocalDate.class),
                 row.get("fare_class", String.class),

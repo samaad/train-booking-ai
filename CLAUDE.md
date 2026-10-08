@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** all 8 services from 01-services are built and tested (Testcontainers; BlockHound in the AI service). `ai-assistant-service` is smoke-tested against real gemma4 + mxbai. Event payload records exist per service but **Kafka is not wired yet** (next pass, per 03/04) — so nothing confirms a booking after payment and no tickets are issued at runtime. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** all 8 services built and tested. **Kafka events are wired (Phase 3)**: transactional outbox + relay, idempotent consumers, choreographed saga with compensations, hold-expiry sweeper — verified end to end in compose. Not yet: Kafka Streams (Phase 6), Keycloak realm / PKCE / Kong auth (Phase 4), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -31,6 +31,18 @@ These were verified against Maven Central and bytecode, and are costly to redisc
 - MinIO publishes no community images any more; the object store is `adobe/s3mock` locally (S3 API, AWS SDK v2 async client). Exclude `apache-client`/`apache5-client`/`url-connection-client` from `software.amazon.awssdk:s3`.
 - Jackson is **3.x** (`tools.jackson.*`). Decoding normalises `OffsetDateTime` to UTC — convert to the railway zone before showing times to the LLM, or it narrates "03:55" for a 07:55 departure.
 - **Never call `UUID.randomUUID()` / default `SecureRandom` on an event loop**: NativePRNG reads `/dev/urandom` (blocking file I/O). `UuidV7` uses DRBG for this reason.
+
+### Events (common-kafka) — conventions
+
+- Event contracts live in `common-kafka` (`org.presight.ai.common.kafka.events`), topic names/partitions in `Topics`. Value = JSON string, `eventId`/`eventType` in headers. Consumers ignore unknown fields; breaking changes need a `.v2` topic.
+- **Every event is written with `Outbox.append(...)` inside the same R2DBC transaction as the state change.** Never `KafkaTemplate.send` from business code (only notification's informational `notification.sent`). Schema comes from Flyway location `classpath:db/outbox` (`V1000__…`) — add it to `spring.flyway.locations`.
+- Consumers: `@KafkaListener` + `IdempotentHandler.handle(record, Type, effect)` — the effect and the `processed_events` row commit together. Listener threads may `block()`; never do that on Netty.
+- Errors: `DomainException` other than UNAVAILABLE, JSON and `IllegalArgumentException` → straight to `<topic>.<group>.DLT`; everything else retried with exponential backoff (~15 s) first. Dead-lettering is logged at ERROR.
+- **No ordering across topics.** booking.created vs booking.cancelled (payment) and booking.confirmed vs booking.cancelled (ticketing) are handled with tombstones — copy that pattern for any new cross-topic dependency.
+- Saga transitions are conditional on the expected `saga_state`; a stale event changes nothing. booking.cancelled is the single compensation trigger (inventory releases even committed seats, payment refunds, ticketing voids).
+- Topics are declared per service (`TopicDeclarations`) — the broker has auto-create off.
+- MongoDB in Boot 4: set `spring.mongodb.representation.uuid: standard` before storing `UUID` ids.
+- Don't run the full build while the compose `services` stack is up: Testcontainers starves (Ryuk timeouts, 16-min container starts).
 
 ### Spring AI 2.0.1 — verified from sources
 

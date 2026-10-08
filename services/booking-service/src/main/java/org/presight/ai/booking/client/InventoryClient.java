@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
+import org.springframework.web.service.annotation.PostExchange;
 import reactor.core.publisher.Mono;
 
 /** inventory-service, as booking needs to see it. A tolerant reader: unknown fields are ignored. */
@@ -22,4 +23,8 @@ public interface InventoryClient {
 
     @GetExchange("/holds/{holdId}")
     Mono<HoldView> getHold(@PathVariable UUID holdId);
+
+    /** Idempotent in inventory (re-committing a committed hold returns it), so a redelivered saga event may call it again. */
+    @PostExchange("/holds/{holdId}/commit")
+    Mono<HoldView> commit(@PathVariable UUID holdId);
 }
