@@ -1,0 +1,10 @@
+apiVersion: v2
+name: inventory-service
+description: Seat holds — Postgres is the source of truth, Redis only a contention filter.
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"
+dependencies:
+  - name: common
+    version: 0.1.0
+    repository: file://../../common

@@ -1,0 +1,68 @@
+# Settings every service chart reads (selected per service by its `uses` list).
+global:
+  image:
+    registry: ""                 # e.g. ghcr.io/presight — images are built from infra/docker/service.Dockerfile
+    tag: ""                      # defaults to each chart's appVersion
+    pullPolicy: IfNotPresent
+
+  oidc:
+    # The issuer must equal the `iss` claim browsers' tokens carry (Keycloak's public hostname);
+    # keys and service tokens are fetched in-cluster.
+    issuer: https://auth.example.com/realms/train-booking
+    jwks: http://keycloak.auth.svc:8080/realms/train-booking/protocol/openid-connect/certs
+    tokenUri: http://keycloak.auth.svc:8080/realms/train-booking/protocol/openid-connect/token
+
+  postgres:
+    host: postgres-rw.data.svc   # e.g. a CloudNativePG cluster; one database + role per service
+    port: 5432
+  mongo:
+    host: mongo.data.svc
+    port: 27017
+  redis:
+    host: redis-master.data.svc
+    port: 6379
+  kafka:
+    bootstrap: train-kafka-bootstrap.kafka.svc:9092   # e.g. Strimzi
+
+  tracing:
+    otlpEndpoint: http://otel-collector.observability.svc:4318/v1/traces
+    samplingProbability: 0.1     # compose uses 1.0
+
+  externalSecrets:
+    enabled: true                # false → create a Secret named after each service yourself
+    storeKind: ClusterSecretStore
+    storeName: train-booking
+    keyPrefix: train-booking     # remote key = <keyPrefix>/<service>
+    refreshInterval: 1h
+
+  serviceMonitor:
+    labels:
+      release: kube-prometheus-stack   # must match the Prometheus operator's serviceMonitorSelector
+
+# Ollama stays outside the cluster's normal workloads (it needs a GPU). The assistant always calls
+# http://ollama:11434; this Service decides where that goes, so app config is identical everywhere.
+ollama:
+  # externalName: a host outside the cluster (kind/minikube → the developer's machine).
+  # none: you run Ollama in-cluster yourself, as a Service named `ollama` in this namespace.
+  mode: externalName
+  externalName: host.docker.internal
+  port: 11434
+
+catalog-service:
+  enabled: true
+inventory-service:
+  enabled: true
+booking-service:
+  enabled: true
+payment-service:
+  enabled: true
+ticketing-service:
+  enabled: true
+notification-service:
+  enabled: true
+user-profile-service:
+  enabled: true
+ai-assistant-service:
+  enabled: true
+seat-availability-streams:
+  enabled: true

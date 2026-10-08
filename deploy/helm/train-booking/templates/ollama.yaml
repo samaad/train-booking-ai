@@ -1,0 +1,19 @@
+{{- if eq .Values.ollama.mode "externalName" }}
+# The assistant's base URL is always http://ollama:11434 (SPRING_AI_OLLAMA_BASE_URL); only this changes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/part-of: train-booking
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: ExternalName
+  externalName: {{ required "ollama.externalName is required" .Values.ollama.externalName }}
+  ports:
+    - name: http
+      port: {{ .Values.ollama.port }}
+{{- else if ne .Values.ollama.mode "none" }}
+{{- fail "ollama.mode must be externalName or none" }}
+{{- end }}

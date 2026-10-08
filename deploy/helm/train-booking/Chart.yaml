@@ -1,0 +1,46 @@
+apiVersion: v2
+name: train-booking
+description: >-
+  Umbrella chart for the train-booking platform: eight reactive services and the seat-availability
+  Kafka Streams app. Infrastructure (Postgres, MongoDB, Redis, Kafka, Keycloak, Kong, the observability
+  stack) is expected to exist already and is wired in through `global`.
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"
+dependencies:
+  - name: catalog-service
+    version: 0.1.0
+    repository: file://../services/catalog-service
+    condition: catalog-service.enabled
+  - name: inventory-service
+    version: 0.1.0
+    repository: file://../services/inventory-service
+    condition: inventory-service.enabled
+  - name: booking-service
+    version: 0.1.0
+    repository: file://../services/booking-service
+    condition: booking-service.enabled
+  - name: payment-service
+    version: 0.1.0
+    repository: file://../services/payment-service
+    condition: payment-service.enabled
+  - name: ticketing-service
+    version: 0.1.0
+    repository: file://../services/ticketing-service
+    condition: ticketing-service.enabled
+  - name: notification-service
+    version: 0.1.0
+    repository: file://../services/notification-service
+    condition: notification-service.enabled
+  - name: user-profile-service
+    version: 0.1.0
+    repository: file://../services/user-profile-service
+    condition: user-profile-service.enabled
+  - name: ai-assistant-service
+    version: 0.1.0
+    repository: file://../services/ai-assistant-service
+    condition: ai-assistant-service.enabled
+  - name: seat-availability-streams
+    version: 0.1.0
+    repository: file://../streams/seat-availability-streams
+    condition: seat-availability-streams.enabled

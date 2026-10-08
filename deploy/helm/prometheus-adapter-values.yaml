@@ -1,0 +1,42 @@
+# Values for the prometheus-community/prometheus-adapter chart: exposes the per-pod metrics the
+# services' HPAs scale on (hpa.podsMetric) through the custom.metrics.k8s.io API.
+#   helm install prometheus-adapter prometheus-community/prometheus-adapter -n monitoring \
+#     -f deploy/helm/prometheus-adapter-values.yaml
+# The `namespace` and `pod` labels are added by the Prometheus operator when scraping ServiceMonitors.
+prometheus:
+  url: http://kube-prometheus-stack-prometheus.monitoring.svc
+  port: 9090
+rules:
+  default: false
+  custom:
+    # Request rate per pod, excluding probe and scrape traffic.
+    - seriesQuery: 'http_server_requests_seconds_count{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: { resource: namespace }
+          pod: { resource: pod }
+      name:
+        matches: ^http_server_requests_seconds_count$
+        as: http_server_requests_per_second
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>,uri!~"/actuator.*"}[2m])) by (<<.GroupBy>>)'
+
+    # ai-assistant-service: tool/model work waiting for a slot on the bounded aiScheduler.
+    - seriesQuery: 'ai_scheduler_queued{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: { resource: namespace }
+          pod: { resource: pod }
+      name:
+        matches: ^ai_scheduler_queued$
+      metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+
+    # notification-service: worst partition lag seen by each pod's consumers.
+    - seriesQuery: 'kafka_consumer_fetch_manager_records_lag_max{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: { resource: namespace }
+          pod: { resource: pod }
+      name:
+        matches: ^kafka_consumer_fetch_manager_records_lag_max$
+        as: kafka_consumer_records_lag_max
+      metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'

@@ -1,0 +1,9 @@
+train-booking {{ .Chart.AppVersion }} installed into {{ .Release.Namespace }}.
+
+Services resolve each other by bare name (http://inventory-service:8082), so install one release per namespace.
+Public traffic goes through Kong (routing and rate limits only); every service validates JWTs itself.
+{{- if .Values.global.externalSecrets.enabled }}
+
+Secrets come from the {{ .Values.global.externalSecrets.storeKind }} "{{ .Values.global.externalSecrets.storeName }}"
+under {{ .Values.global.externalSecrets.keyPrefix }}/<service>. Pods stay Pending until those Secrets sync.
+{{- end }}

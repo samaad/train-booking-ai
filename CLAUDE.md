@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** Phases 0–6 built. Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Phase 6 (Kafka Streams seat availability, OTel tracing to Tempo across the AI seam and Kafka, custom metrics, Grafana dashboards, ECS logs) verified in compose. Not yet: React/mobile frontends, K8s (Phase 7), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** Phases 0–6 built; Phase 7 Helm charts authored (hardening items not yet). Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Phase 6 (Kafka Streams seat availability, OTel tracing to Tempo across the AI seam and Kafka, custom metrics, Grafana dashboards, ECS logs) verified in compose. Not yet: React/mobile frontends, Phase 7 hardening (seat-contention load test, DLT replay tooling, fraud/velocity topology, Debezium CDC, batch-admin-service), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -63,6 +63,13 @@ These were verified against Maven Central and bytecode, and are costly to redisc
 - Logs are ECS JSON (`LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs`). Trace ids are flat top-level `traceId`/`spanId` keys.
 - `seat-availability-streams` (`streams/`, servlet + virtual threads, `exactly_once_v2`) must declare its **source** topics as `NewTopic`s too, or startup dies with `MissingSourceTopicException`. Its output is the compacted `seat.availability.v1`, plus `GET /occupancy/{train}/{date}` and the WebSocket `/ws/seat-map`.
 - AI `PriceGuard` only trusts money-named JSON fields (`amount|price|fare|total|cost`): digits inside UUIDs or dates must never vouch for a quoted price.
+
+### Kubernetes (deploy/helm) — conventions
+
+- Library chart `common` holds every template; service charts are `Chart.yaml` + `values.yaml` only. Run `deploy/helm/build.sh` (Docker-only helm 4 + kubeconform): **leaf charts must be re-vendored before the umbrella**, or edits to `common` silently render the old templates. `charts/` and `Chart.lock` are gitignored.
+- Pods run read-only root FS, UID 10001 (pinned numerically in `service.Dockerfile` — `runAsNonRoot` cannot verify a user *name*), all caps dropped; `/tmp` and any extra writable dir must be an emptyDir (`writableDirs`). Verified by running compose under the same restrictions.
+- Secrets only via `ExternalSecret` (`secretEnv` maps env var → property under `train-booking/<service>`). The gitignore excludes `deploy/helm/**/*-secret.yaml` — don't name templates that way.
+- `seat-availability-streams` stays at 1 replica (`Recreate`) until interactive queries route via `application.server`. AI service scales on `ai_scheduler_queued`, not CPU. Ollama is reached as `http://ollama:11434` via the umbrella's ExternalName Service.
 
 ### Spring AI 2.0.1 — verified from sources
 
@@ -128,11 +135,11 @@ Consequences that must hold in code:
 - Compose: **`./mvnw -q clean package -DskipTests`** (without `clean`, Boot repackage skips the up-to-date fat jars and images ship a stale common-lib), then `docker compose -f infra/docker-compose.yml --profile <service>|services up -d --build --wait`. A service profile pulls in the infra it needs; `services` starts all seven (~3.5 GB of JVMs). Images copy the host-built jar.
 - Host port 8088 is the user's own ksqlDB — leave it alone. s3mock is on host 9190 (Prometheus has 9090).
 - Run services from the IDE against compose infra with `DB_PORT=5433` (see the postgres_db note above).
-- No kubectl context configured — K8s manifests are authoring-only, not deployable here.
+- No kubectl context, helm or kind installed — K8s charts are authoring-only (lint/template/kubeconform via Docker), never installed here.
 
 ## Repo conventions
 
-- Layout: `common-lib/*` (plain jars), `services/*` (bootable), `streams/*` (Kafka Streams apps, blocking, isolated), `infra/` (compose, init scripts, Kong, Prometheus/Grafana).
+- Layout: `common-lib/*` (plain jars), `services/*` (bootable), `streams/*` (Kafka Streams apps, blocking, isolated), `deploy/helm/` (charts), `infra/` (compose, init scripts, Kong, Prometheus/Grafana).
 - AI service: `POST /chat` (SSE events: conversation, token, tool, confirmation, warning, fallback, error, done), `GET /conversations`, `GET /conversations/{id}/messages`; Kong `/api/assistant`. Compose profile `assistant`.
 - Ports: catalog 8081, inventory 8082, booking 8083, payment 8084, ticketing 8085, notification 8086, user-profile 8087, seat-availability-streams 8089, ai-assistant 8080. Prometheus 9090, Grafana 3000, Tempo 3200. Kong proxy 8000, Keycloak 8180, kafka-ui 8090.
 - `common-core` stays framework-free (ids, `DomainException`, `IdempotencyKey`, `RequestFingerprint`). `common-web` auto-configures RFC 9457 problem+json error mapping — throw `DomainException` with an `UPPER_SNAKE` code rather than building error responses by hand. Use `IdempotencyKeyHeader` for the header and `RemoteCallErrors.from(service)` in `onErrorMap` on every inter-service call.

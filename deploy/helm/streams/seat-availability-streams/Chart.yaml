@@ -1,0 +1,10 @@
+apiVersion: v2
+name: seat-availability-streams
+description: Kafka Streams seat-availability KTable, occupancy API and live seat-map WebSocket.
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"
+dependencies:
+  - name: common
+    version: 0.1.0
+    repository: file://../../common

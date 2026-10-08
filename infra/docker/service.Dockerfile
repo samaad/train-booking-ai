@@ -10,8 +10,9 @@ COPY ${MODULE_DIR}/${SERVICE}/target/${SERVICE}-*.jar app.jar
 RUN java -Djarmode=tools -jar app.jar extract --layers --launcher --destination extracted
 
 FROM eclipse-temurin:25-jre
-RUN groupadd --system app && useradd --system --gid app app
-USER app
+# Numeric UID so Kubernetes can enforce runAsNonRoot (it cannot verify a user name).
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app app
+USER 10001:10001
 WORKDIR /app
 # Least- to most-frequently changing, so dependency layers stay cached.
 COPY --from=extract /build/extracted/dependencies/ ./

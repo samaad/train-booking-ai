@@ -1,0 +1,10 @@
+apiVersion: v2
+name: ai-assistant-service
+description: Chat assistant over a local LLM (Ollama); tools call the deterministic services.
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"
+dependencies:
+  - name: common
+    version: 0.1.0
+    repository: file://../../common

@@ -1,0 +1,36 @@
+# Local kind/minikube overrides: compose-style infra reached by in-cluster names, no external store,
+# full trace sampling. Create each service's Secret yourself (see README.md).
+global:
+  image:
+    tag: dev
+    pullPolicy: Never              # kind load docker-image train-booking/<service>:dev
+  oidc:
+    issuer: http://localhost:8180/realms/train-booking
+    jwks: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
+    tokenUri: http://keycloak:8080/realms/train-booking/protocol/openid-connect/token
+  postgres: { host: postgres }
+  mongo: { host: mongo }
+  redis: { host: redis }
+  kafka: { bootstrap: "kafka:29092" }
+  tracing:
+    otlpEndpoint: http://otel-collector:4318/v1/traces
+    samplingProbability: 1.0
+  externalSecrets:
+    enabled: false
+  serviceMonitor:
+    labels: {}
+
+# A laptop cannot hold 2× every JVM next to a 9.6 GB model.
+catalog-service: &one
+  hpa: { enabled: false }
+  replicas: 1
+  serviceMonitor: { enabled: false }
+inventory-service: *one
+booking-service: *one
+payment-service: *one
+ticketing-service: *one
+notification-service: *one
+user-profile-service: *one
+ai-assistant-service: *one
+seat-availability-streams:
+  serviceMonitor: { enabled: false }

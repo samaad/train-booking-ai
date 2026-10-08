@@ -45,6 +45,9 @@ frontend/**/dist/
 *.key
 deploy/helm/**/secrets*.yaml
 deploy/helm/**/*-secret.yaml
+# Vendored by `helm dependency update` (deploy/helm/build.sh) — rebuilt from the chart sources.
+deploy/helm/**/charts/
+deploy/helm/**/Chart.lock
 
 ### OS ###
 .DS_Store

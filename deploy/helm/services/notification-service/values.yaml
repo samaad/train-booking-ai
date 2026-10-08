@@ -1,0 +1,59 @@
+# notification-service — values only; templates live in the common library chart.
+
+image:
+  repository: train-booking/notification-service
+  tag: ""          # defaults to global.image.tag, then appVersion
+
+port: 8086
+replicas: 2
+
+# Shared settings this service reads from global (oidc, serviceTokens, postgres, mongo, redis, kafka).
+uses: [oidc, mongo, kafka]
+
+env: {}
+
+# No secrets.
+secretEnv: {}
+
+javaOpts: "-XX:MaxRAMPercentage=75"
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    memory: "768Mi"
+
+# Consumers past the topic's partition count sit idle — keep maxReplicas ≤ partitions.
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  cpuUtilization: 70
+  podsMetric:
+    name: kafka_consumer_records_lag_max
+    averageValue: "100"
+
+pdb:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+probes:
+  startupFailureThreshold: 36   # 3 minutes
+
+terminationGracePeriodSeconds: 45
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+writableDirs: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+nameOverride: ""
+global: {}

@@ -1,0 +1,57 @@
+# seat-availability-streams — values only; templates live in the common library chart.
+
+image:
+  repository: train-booking/seat-availability-streams
+  tag: ""          # defaults to global.image.tag, then appVersion
+
+port: 8089
+replicas: 1
+component: streams
+
+# Shared settings this service reads from global (oidc, serviceTokens, postgres, mongo, redis, kafka).
+uses: [kafka]
+
+env:
+  STREAMS_STATE_DIR: "/var/lib/kafka-streams"
+
+# No secrets.
+secretEnv: {}
+
+javaOpts: "-XX:MaxRAMPercentage=75"
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    memory: "1Gi"
+
+hpa:
+  enabled: false
+
+pdb:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+probes:
+  startupFailureThreshold: 36   # 3 minutes
+
+terminationGracePeriodSeconds: 45
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+nameOverride: ""
+global: {}
+# One replica: /occupancy and the live seat map read the LOCAL state store. A second instance would own
+# half the partitions and answer the rest with 404s until application.server routing is added.
+# Recreate, so an update never runs two instances that split partitions mid-query.
+strategy:
+  type: Recreate
+writableDirs:
+  - name: state
+    mountPath: /var/lib/kafka-streams
+    sizeLimit: 2Gi
+

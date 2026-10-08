@@ -1,0 +1,66 @@
+# ai-assistant-service — values only; templates live in the common library chart.
+
+image:
+  repository: train-booking/ai-assistant-service
+  tag: ""          # defaults to global.image.tag, then appVersion
+
+port: 8080
+replicas: 2
+
+# Shared settings this service reads from global (oidc, serviceTokens, postgres, mongo, redis, kafka).
+uses: [oidc, postgres, mongo]
+
+env:
+  SPRING_AI_OLLAMA_BASE_URL: "http://ollama:11434"
+  CATALOG_URL: "http://catalog-service:8081"
+  INVENTORY_URL: "http://inventory-service:8082"
+  BOOKING_URL: "http://booking-service:8083"
+
+# ENV_VAR: property under <global.externalSecrets.keyPrefix>/ai-assistant-service in the secret store.
+secretEnv:
+  DB_PASSWORD: db-password
+
+javaOpts: "-XX:MaxRAMPercentage=75"
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    memory: "1536Mi"
+
+# Scale on queued tool/model work, not CPU: the pod mostly waits on Ollama. More replicas only help if Ollama itself has headroom.
+hpa:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 2
+  cpuUtilization: 70
+  podsMetric:
+    name: ai_scheduler_queued
+    averageValue: "4"
+
+pdb:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+probes:
+  startupFailureThreshold: 36   # 3 minutes
+
+terminationGracePeriodSeconds: 45
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+writableDirs: []
+tolerations: []
+affinity: {}
+nameOverride: ""
+global: {}
+# The model server is the real bottleneck. In a real cluster pin this next to GPU-backed Ollama, e.g.
+# nodeSelector: { nvidia.com/gpu.present: "true" }
+nodeSelector: {}
+

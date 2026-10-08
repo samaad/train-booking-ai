@@ -1,0 +1,5 @@
+apiVersion: v2
+name: common
+description: Shared templates for every train-booking Spring Boot service. Service charts supply values only.
+type: library
+version: 0.1.0

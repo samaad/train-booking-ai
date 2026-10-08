@@ -1,0 +1,62 @@
+# booking-service — values only; templates live in the common library chart.
+
+image:
+  repository: train-booking/booking-service
+  tag: ""          # defaults to global.image.tag, then appVersion
+
+port: 8083
+replicas: 2
+
+# Shared settings this service reads from global (oidc, serviceTokens, postgres, mongo, redis, kafka).
+uses: [oidc, serviceTokens, postgres, kafka]
+
+env:
+  CATALOG_URL: "http://catalog-service:8081"
+  INVENTORY_URL: "http://inventory-service:8082"
+
+# ENV_VAR: property under <global.externalSecrets.keyPrefix>/booking-service in the secret store.
+secretEnv:
+  DB_PASSWORD: db-password
+  TRAIN_SERVICES_SECRET: client-secret
+
+javaOpts: "-XX:MaxRAMPercentage=75"
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    memory: "768Mi"
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  cpuUtilization: 70
+  podsMetric:
+    name: http_server_requests_per_second
+    averageValue: "50"
+
+pdb:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+probes:
+  startupFailureThreshold: 36   # 3 minutes
+
+terminationGracePeriodSeconds: 45
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+writableDirs: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+nameOverride: ""
+global: {}
