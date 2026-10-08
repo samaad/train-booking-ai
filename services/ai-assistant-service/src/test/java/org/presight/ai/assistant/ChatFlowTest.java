@@ -17,6 +17,7 @@ import org.presight.ai.assistant.FakeOllama.Call;
 import org.presight.ai.assistant.FakeOllama.ToolCalls;
 import org.presight.ai.assistant.FakeOllama.Tokens;
 import org.presight.ai.assistant.rag.PgVectorRag;
+import org.presight.ai.common.security.testing.TestIssuer;
 import org.presight.ai.common.idempotency.IdempotencyKey;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -75,8 +76,7 @@ class ChatFlowTest {
         registry.add("spring.http.serviceclient.catalog.base-url", services::baseUrl);
         registry.add("spring.http.serviceclient.inventory.base-url", services::baseUrl);
         registry.add("spring.http.serviceclient.booking.base-url", services::baseUrl);
-        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", issuer::issuer);
-        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", issuer::jwksUri);
+        issuer.register(registry);
     }
 
     @AfterAll
@@ -111,7 +111,7 @@ class ChatFlowTest {
         ollama.brain = req -> "tool".equals(FakeOllama.lastRole(req))
                 ? new Tokens(List.of("ER101 ", "departs ", "07:55."))
                 : new ToolCalls(List.of(new Call("searchTrains", Map.of("from", "Dubai", "to", "FUJ", "date", DATE))));
-        String token = issuer.token("user-a", "Aisha", "aisha@example.com");
+        String token = issuer.passenger("user-a", Map.of("given_name", "Aisha", "email", "aisha@example.com"));
 
         List<ServerSentEvent<Map<String, Object>>> events = chat(token, null, "Trains from Dubai to Fujairah on " + DATE + "?");
 
@@ -156,7 +156,7 @@ class ChatFlowTest {
         List<Flux<ServerSentEvent<Map<String, Object>>>> chats = new ArrayList<>();
         for (int i = 1; i <= 8; i++) {
             String user = i % 2 == 0 ? "user-b" : "user-a";
-            String token = issuer.token(user + "-" + i, user, user + "@example.com");
+            String token = issuer.passenger(user + "-" + i, Map.of("given_name", user, "email", user + "@example.com"));
             String date = "2026-11-%02d".formatted(i);
             tokenByDate.put(date, "Bearer " + token);
             chats.add(chatFlux(token, null, "search " + date));
@@ -185,7 +185,7 @@ class ChatFlowTest {
             return new Tokens(List.of("Please confirm the booking card."));
         };
 
-        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.token("user-c", "C", "c@example.com"), null, "Book B4 on ER101");
+        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.passenger("user-c", Map.of("given_name", "C", "email", "c@example.com")), null, "Book B4 on ER101");
 
         Map<String, Object> card = first(events, "confirmation");
         assertThat(card).containsEntry("action", "CONFIRM_BOOKING").containsEntry("path", "/api/booking/bookings")
@@ -203,12 +203,27 @@ class ChatFlowTest {
                 : new ToolCalls(List.of(new Call("confirmBooking",
                         Map.of("holdId", invented, "fromStation", "DXB", "toStation", "FUJ"))));
 
-        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.token("user-d", "D", "d@example.com"), null, "confirm it");
+        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.passenger("user-d", Map.of("given_name", "D", "email", "d@example.com")), null, "confirm it");
 
         assertThat(names(events)).doesNotContain("confirmation");
         assertThat(first(events, "tool")).containsEntry("outcome", "error")
                 .extractingByKey("result").asString().contains("UNKNOWN_HOLD");
         assertThat(services.seen("GET", "/holds")).isEmpty(); // rejected before any service call
+    }
+
+    @Test
+    void anotherUsersBookingReachesTheModelAsNotFound() {
+        services.bookingJson = null; // booking-service answers 404 for a booking that is not the caller's
+        String bookingId = UUID.randomUUID().toString();
+        ollama.brain = req -> "tool".equals(FakeOllama.lastRole(req))
+                ? new Tokens(List.of("Not found."))
+                : new ToolCalls(List.of(new Call("getBookingStatus", Map.of("bookingId", bookingId))));
+
+        Map<String, Object> tool = first(chat(issuer.passenger("user-k"), null, "status?"), "tool");
+
+        // The real downstream code, not a generic failure: an implicit client circuit breaker once hid it.
+        assertThat(tool).containsEntry("outcome", "error");
+        assertThat(tool.get("result").toString()).contains("BOOKING_NOT_FOUND");
     }
 
     @Test
@@ -222,7 +237,7 @@ class ChatFlowTest {
         }
         ollama.brain = req -> "tool".equals(FakeOllama.lastRole(req)) ? new Tokens(List.of("ok")) : new ToolCalls(calls);
 
-        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.token("user-e", "E", "e@example.com"), null, "go");
+        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.passenger("user-e", Map.of("given_name", "E", "email", "e@example.com")), null, "go");
 
         List<String> outcomes = events.stream().filter(e -> "tool".equals(e.event())).map(e -> (String) e.data().get("outcome")).toList();
         assertThat(outcomes).hasSize(7);
@@ -237,20 +252,20 @@ class ChatFlowTest {
                 ? new Tokens(List.of("Your fare was AED 99.00."))
                 : new ToolCalls(List.of(new Call("getBookingStatus", Map.of("bookingId", bookingId))));
 
-        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.token("user-f", "F", "f@example.com"), null, "status?");
+        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.passenger("user-f", Map.of("given_name", "F", "email", "f@example.com")), null, "status?");
         assertThat(first(events, "warning")).containsEntry("code", "UNVERIFIED_PRICE");
 
         ollama.brain = req -> "tool".equals(FakeOllama.lastRole(req))
                 ? new Tokens(List.of("Your fare was AED 142.00."))
                 : new ToolCalls(List.of(new Call("getBookingStatus", Map.of("bookingId", bookingId))));
-        assertThat(names(chat(issuer.token("user-f", "F", "f@example.com"), null, "status?"))).doesNotContain("warning");
+        assertThat(names(chat(issuer.passenger("user-f", Map.of("given_name", "F", "email", "f@example.com")), null, "status?"))).doesNotContain("warning");
     }
 
     // ------------------------------------------------------------------------------------------ memory
 
     @Test
     void conversationsAreRememberedAndPrivateToTheirOwner() {
-        String alice = issuer.token("user-g", "G", "g@example.com");
+        String alice = issuer.passenger("user-g", Map.of("given_name", "G", "email", "g@example.com"));
         ollama.brain = req -> new Tokens(List.of("first answer"));
         String conversationId = (String) first(chat(alice, null, "first question"), "conversation").get("conversationId");
 
@@ -259,7 +274,7 @@ class ChatFlowTest {
         String history = ollama.chatRequests.getLast().get("messages").toString();
         assertThat(history).contains("first question", "first answer", "second question");
 
-        String mallory = issuer.token("user-h", "H", "h@example.com");
+        String mallory = issuer.passenger("user-h", Map.of("given_name", "H", "email", "h@example.com"));
         client.post().uri("/chat").header("Authorization", "Bearer " + mallory).accept(MediaType.TEXT_EVENT_STREAM)
                 .bodyValue(Map.of("conversationId", conversationId, "message", "show me")).exchange()
                 .expectStatus().isNotFound()
@@ -276,7 +291,7 @@ class ChatFlowTest {
     @Test
     void ollamaDownFallsBackToDeterministicSearch() {
         ollama.brain = req -> new FakeOllama.Fail(503);
-        String token = issuer.token("user-i", "I", "i@example.com");
+        String token = issuer.passenger("user-i", Map.of("given_name", "I", "email", "i@example.com"));
 
         Map<String, Object> tier3 = first(chat(token, null, "Dubai to Fujairah tomorrow"), "fallback");
         assertThat(tier3).containsEntry("tier", 3);
@@ -290,7 +305,7 @@ class ChatFlowTest {
     void aStreamThatDiesMidAnswerEndsWithAnExplicitError() {
         ollama.brain = req -> new FakeOllama.Abort(List.of("The next ", "train "));
 
-        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.token("user-j", "J", "j@example.com"), null, "hi");
+        List<ServerSentEvent<Map<String, Object>>> events = chat(issuer.passenger("user-j", Map.of("given_name", "J", "email", "j@example.com")), null, "hi");
 
         assertThat(text(events)).isEqualTo("The next train ");
         assertThat(first(events, "error")).containsEntry("code", "RESPONSE_INTERRUPTED");
@@ -300,8 +315,11 @@ class ChatFlowTest {
     @Test
     void chatRequiresAValidToken() {
         client.post().uri("/chat").bodyValue(Map.of("message", "hi")).exchange().expectStatus().isUnauthorized();
-        client.post().uri("/chat").header("Authorization", "Bearer " + issuer.forgedToken("x"))
+        client.post().uri("/chat").header("Authorization", "Bearer " + issuer.forged("x"))
                 .bodyValue(Map.of("message", "hi")).exchange().expectStatus().isUnauthorized();
+        // A valid token without the ai:chat scope may not chat.
+        client.post().uri("/chat").header("Authorization", "Bearer " + issuer.withScopes("x", "booking:read"))
+                .bodyValue(Map.of("message", "hi")).exchange().expectStatus().isForbidden();
     }
 
     // ------------------------------------------------------------------------------------------ helpers

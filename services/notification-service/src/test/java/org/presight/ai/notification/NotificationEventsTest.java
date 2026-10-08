@@ -82,13 +82,13 @@ class NotificationEventsTest {
     }
 
     private static BookingCreated created(UUID booking) {
-        return new BookingCreated(UUID.randomUUID(), booking, "ABC234", UUID.randomUUID(), "ER101", LocalDate.of(2026, 10, 20),
+        return new BookingCreated(UUID.randomUUID(), booking, "user-1", "ABC234", UUID.randomUUID(), "ER101", LocalDate.of(2026, 10, 20),
                 "BUSINESS", "B4", "DXB", "FUJ", OffsetDateTime.now(), "Aisha Khan", "aisha@example.com",
                 new BigDecimal("142.00"), "AED", Instant.now());
     }
 
     private static BookingConfirmed confirmed(UUID booking) {
-        return new BookingConfirmed(UUID.randomUUID(), booking, "ABC234", UUID.randomUUID(), "ER101", LocalDate.of(2026, 10, 20),
+        return new BookingConfirmed(UUID.randomUUID(), booking, "user-1", "ABC234", UUID.randomUUID(), "ER101", LocalDate.of(2026, 10, 20),
                 "BUSINESS", "B4", "DXB", "FUJ", OffsetDateTime.now(), "Aisha Khan", Instant.now());
     }
 }

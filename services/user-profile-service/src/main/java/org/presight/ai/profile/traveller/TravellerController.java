@@ -15,6 +15,7 @@ import org.presight.ai.common.error.DomainException;
 import org.presight.ai.common.id.UuidV7;
 import org.springframework.http.ResponseEntity;
 import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -53,6 +54,7 @@ public class TravellerController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('SCOPE_profile:read')")
     public Flux<Traveller> list(@AuthenticationPrincipal Jwt jwt) {
         return db.sql("SELECT * FROM traveller WHERE user_id = :userId ORDER BY created_at")
                 .bind("userId", jwt.getSubject())
@@ -61,6 +63,7 @@ public class TravellerController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('SCOPE_profile:write')")
     public Mono<ResponseEntity<Traveller>> add(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody TravellerRequest req) {
         UUID id = UuidV7.generate();
         return requireProfile(jwt.getSubject())
@@ -80,6 +83,7 @@ public class TravellerController {
     }
 
     @DeleteMapping("/{travellerId}")
+    @PreAuthorize("hasAuthority('SCOPE_profile:write')")
     public Mono<ResponseEntity<Void>> remove(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID travellerId) {
         return db.sql("DELETE FROM traveller WHERE id = :id AND user_id = :userId")
                 .bind("id", travellerId)

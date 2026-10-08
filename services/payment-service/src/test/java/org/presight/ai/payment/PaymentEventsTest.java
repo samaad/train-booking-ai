@@ -34,9 +34,27 @@ import org.testcontainers.kafka.KafkaContainer;
 @Import(PaymentApiTest.Config.class)
 class PaymentEventsTest {
 
+    static final org.presight.ai.common.security.testing.TestIssuer issuer = new org.presight.ai.common.security.testing.TestIssuer();
+
+    @org.springframework.test.context.DynamicPropertySource
+    static void oidc(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        issuer.register(registry);
+    }
+
+    WebTestClient raw;
+    WebTestClient admin;
+
+    @Autowired
+    void tokens(WebTestClient raw) {
+        this.raw = raw;
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.passenger("user-1")).build();
+        this.admin = raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.withRoles("ops-1", "ADMIN")).build();
+    }
+
+
     private static final Duration WAIT = Duration.ofSeconds(20);
 
-    @Autowired WebTestClient client;
+    WebTestClient client;
     @Autowired KafkaContainer kafka;
     @Autowired PaymentApiTest.FakePsp psp;
 
@@ -147,7 +165,7 @@ class PaymentEventsTest {
     }
 
     private static BookingCreated created(UUID booking, String amount) {
-        return new BookingCreated(UUID.randomUUID(), booking, "ABC234", UUID.randomUUID(), "ER101", LocalDate.now().plusDays(5),
+        return new BookingCreated(UUID.randomUUID(), booking, "user-1", "ABC234", UUID.randomUUID(), "ER101", LocalDate.now().plusDays(5),
                 "BUSINESS", "B4", "DXB", "FUJ", OffsetDateTime.now().plusDays(5), "Aisha Khan", "aisha@example.com",
                 new BigDecimal(amount), "AED", Instant.now());
     }

@@ -1,5 +1,7 @@
-# DB-less declarative config. Routing + rate limiting only — no auth plugins here.
-# Services validate JWTs themselves (Spring Security resource server, Phase 4).
+# DB-less declarative config (05-security). Kong OSS does what it is good at — routing, rate limiting,
+# CORS, request shaping — and NO authentication: its bundled jwt plugin cannot rotate JWKS (a key rotation
+# becomes an outage), checks no audience or scope, and CVE-2026-14916 bypassed it. Every service validates
+# the JWT itself against Keycloak's JWKS. Never enable the jwt plugin here.
 _format_version: "3.0"
 
 # notification-service has no public API (event-driven only), so it has no route.
@@ -60,9 +62,35 @@ services:
         paths: ["/api/assistant"]
         protocols: [http, https]
         strip_path: true
+        response_buffering: false # SSE chat: stream tokens through as they arrive
 
 plugins:
   - name: rate-limiting
     config:
       minute: 600
       policy: local
+  # Identity comes only from the validated token. Strip any identity-looking header a client sends, so no
+  # service (or future code) can be tricked into trusting it.
+  - name: request-transformer
+    config:
+      remove:
+        headers:
+          - X-User-Id
+          - X-User-Name
+          - X-User-Email
+          - X-User-Roles
+          - X-Forwarded-User
+          - X-Authenticated-User
+          - X-Remote-User
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 1
+      size_unit: megabytes
+  - name: cors
+    config:
+      origins: ["http://localhost:5173"] # train-web (Keycloak redirect URI origin)
+      methods: [GET, POST, PUT, DELETE, OPTIONS]
+      headers: [Authorization, Content-Type, Idempotency-Key, Accept]
+      exposed_headers: [Location]
+      credentials: false # bearer tokens, not cookies
+      max_age: 600

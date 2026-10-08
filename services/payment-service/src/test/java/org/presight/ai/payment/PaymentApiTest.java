@@ -30,6 +30,24 @@ import reactor.core.publisher.Mono;
 @Import(PaymentApiTest.Config.class)
 public class PaymentApiTest {
 
+    static final org.presight.ai.common.security.testing.TestIssuer issuer = new org.presight.ai.common.security.testing.TestIssuer();
+
+    @org.springframework.test.context.DynamicPropertySource
+    static void oidc(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        issuer.register(registry);
+    }
+
+    WebTestClient raw;
+    WebTestClient admin;
+
+    @Autowired
+    void tokens(WebTestClient raw) {
+        this.raw = raw;
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.passenger("user-1")).build();
+        this.admin = raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.withRoles("ops-1", "ADMIN")).build();
+    }
+
+
     /** A PSP that honours idempotency keys, can be taken down, and counts real charges. */
     public static class FakePsp implements PaymentGateway {
         volatile boolean down;
@@ -76,7 +94,6 @@ public class PaymentApiTest {
         }
     }
 
-    @Autowired
     WebTestClient client;
 
     @Autowired
@@ -158,16 +175,35 @@ public class PaymentApiTest {
         String id = (String) pay(UUID.randomUUID(), "20.00", "tok_visa", key()).expectStatus().isCreated()
                 .expectBody(Map.class).returnResult().getResponseBody().get("paymentId");
 
-        client.post().uri("/payments/{id}/refund", id).exchange()
+        client.post().uri("/payments/{id}/refund", id).exchange().expectStatus().isForbidden(); // travellers cancel instead
+        admin.post().uri("/payments/{id}/refund", id).exchange()
                 .expectStatus().isOk().expectBody().jsonPath("$.status").isEqualTo("REFUNDED");
-        client.post().uri("/payments/{id}/refund", id).exchange()
+        admin.post().uri("/payments/{id}/refund", id).exchange()
                 .expectStatus().isOk().expectBody().jsonPath("$.status").isEqualTo("REFUNDED");
 
         String declined = (String) pay(UUID.randomUUID(), "20.00", "tok_decline", key()).expectStatus().isCreated()
                 .expectBody(Map.class).returnResult().getResponseBody().get("paymentId");
-        client.post().uri("/payments/{id}/refund", declined).exchange()
+        admin.post().uri("/payments/{id}/refund", declined).exchange()
                 .expectStatus().isEqualTo(409).expectBody().jsonPath("$.code").isEqualTo("NOT_REFUNDABLE");
-        client.post().uri("/payments/{id}/refund", UUID.randomUUID()).exchange().expectStatus().isNotFound();
+        admin.post().uri("/payments/{id}/refund", UUID.randomUUID()).exchange().expectStatus().isNotFound();
+    }
+
+    @Test
+    void onlyTheBookingsOwnerMayPayForIt() {
+        UUID booking = UUID.randomUUID();
+        db.sql("INSERT INTO booking_charge (booking_id, user_id, amount, currency) VALUES (:id, 'user-9', 30.00, 'AED')")
+                .bind("id", booking).then().block();
+
+        client.post().uri("/payments").header("Idempotency-Key", key())
+                .bodyValue(Map.of("bookingId", booking.toString(), "amount", new BigDecimal("30.00"), "currency", "AED", "paymentToken", "tok_visa"))
+                .exchange().expectStatus().isNotFound().expectBody().jsonPath("$.code").isEqualTo("BOOKING_NOT_FOUND");
+        raw.post().uri("/payments").header("Idempotency-Key", key())
+                .bodyValue(Map.of("bookingId", booking.toString(), "amount", new BigDecimal("30.00"), "currency", "AED", "paymentToken", "tok_visa"))
+                .exchange().expectStatus().isUnauthorized();
+        raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.passenger("user-9")).build()
+                .post().uri("/payments").header("Idempotency-Key", key())
+                .bodyValue(Map.of("bookingId", booking.toString(), "amount", new BigDecimal("30.00"), "currency", "AED", "paymentToken", "tok_visa"))
+                .exchange().expectStatus().isCreated();
     }
 
     @Test

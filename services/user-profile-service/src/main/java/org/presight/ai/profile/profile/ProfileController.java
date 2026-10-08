@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.KafkaAdmin;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -57,11 +58,13 @@ public class ProfileController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('SCOPE_profile:read')")
     public Mono<Profile> me(@AuthenticationPrincipal Jwt jwt) {
         return current(jwt);
     }
 
     @PutMapping
+    @PreAuthorize("hasAuthority('SCOPE_profile:write')")
     public Mono<Profile> update(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ProfileUpdate update) {
         String userId = jwt.getSubject();
         return current(jwt)

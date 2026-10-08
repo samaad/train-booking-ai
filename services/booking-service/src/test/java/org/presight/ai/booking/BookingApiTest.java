@@ -27,6 +27,23 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @Import(BookingApiTest.Containers.class)
 public class BookingApiTest {
 
+    static final org.presight.ai.common.security.testing.TestIssuer issuer = new org.presight.ai.common.security.testing.TestIssuer();
+    static final String USER_TOKEN = issuer.passenger("user-1");
+
+    @DynamicPropertySource
+    static void oidc(DynamicPropertyRegistry registry) {
+        issuer.register(registry);
+    }
+
+    WebTestClient raw;
+
+    @Autowired
+    void tokens(WebTestClient raw) {
+        this.raw = raw;
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + USER_TOKEN).build();
+    }
+
+
     @TestConfiguration(proxyBeanMethods = false)
     public static class Containers {
         @Bean
@@ -56,7 +73,6 @@ public class BookingApiTest {
         stub.stop();
     }
 
-    @Autowired
     WebTestClient client;
 
     @BeforeEach
@@ -157,13 +173,44 @@ public class BookingApiTest {
     }
 
     @Test
+    void theUsersOwnTokenIsUsedToReadTheirHold() {
+        create(activeHold("B10"), key()).expectStatus().isCreated();
+        assertThat(stub.holdReadAuth).last().isEqualTo("Bearer " + USER_TOKEN); // inventory checks it is their hold
+    }
+
+    @Test
+    void bookingsArePrivateToTheirOwner() {
+        String id = idOf(create(activeHold("B11"), key()).expectStatus().isCreated());
+        WebTestClient other = as(issuer.passenger("user-2"));
+
+        other.get().uri("/bookings/{id}", id).exchange().expectStatus().isNotFound(); // not 403: no oracle
+        other.post().uri("/bookings/{id}/cancel", id).exchange().expectStatus().isNotFound();
+        as(issuer.withRoles("desk-1", "AGENT")).get().uri("/bookings/{id}", id).exchange().expectStatus().isOk();
+        client.get().uri("/bookings/{id}", id).exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.status").isEqualTo("PENDING_PAYMENT");
+    }
+
+    @Test
+    void tokensAndScopesAreRequired() {
+        raw.post().uri("/bookings").header("Idempotency-Key", key()).bodyValue(body(UUID.randomUUID(), "A")).exchange()
+                .expectStatus().isUnauthorized();
+        as(issuer.withScopes("user-3", "booking:read")).post().uri("/bookings").header("Idempotency-Key", key())
+                .bodyValue(body(UUID.randomUUID(), "A")).exchange().expectStatus().isForbidden();
+        as(issuer.wrongAudience("user-1")).get().uri("/bookings/{id}", UUID.randomUUID()).exchange().expectStatus().isUnauthorized();
+    }
+
+    private WebTestClient as(String token) {
+        return raw.mutate().defaultHeader("Authorization", "Bearer " + token).build();
+    }
+
+    @Test
     void validatesTheRequest() {
         client.post().uri("/bookings").header("Idempotency-Key", key())
                 .bodyValue(Map.of("holdId", UUID.randomUUID().toString(), "fromStation", "DXB", "toStation", "FUJ",
                         "passengerName", "A", "contactEmail", "not-an-email"))
                 .exchange().expectStatus().isBadRequest();
         client.post().uri("/bookings").bodyValue(body(UUID.randomUUID(), "A")).exchange()
-                .expectStatus().isBadRequest(); // missing Idempotency-Key
+                .expectStatus().isBadRequest(); // missing Idempotency-Key (with a valid token)
     }
 
     private UUID activeHold(String seat) {

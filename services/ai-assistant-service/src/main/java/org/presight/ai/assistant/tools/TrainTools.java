@@ -277,9 +277,13 @@ public class TrainTools implements TrainToolRegistry {
             result = new ToolError("INVALID_ARGUMENT", e.getMessage());
             outcome = "invalid_argument";
         } catch (RuntimeException e) {
-            // e.g. a timeout from block(): say so plainly rather than let the model guess.
-            result = new ToolError("TOOL_FAILED", tool + " failed: the service did not answer in time");
-            outcome = "error";
+            // Say what happened plainly rather than let the model guess — and only blame time when it was time.
+            boolean timedOut = e.getCause() instanceof java.util.concurrent.TimeoutException
+                    || String.valueOf(e.getMessage()).startsWith("Timeout on blocking read");
+            log.warn("Tool {} failed", tool, e);
+            result = new ToolError(timedOut ? "TOOL_TIMEOUT" : "TOOL_FAILED",
+                    tool + (timedOut ? " failed: the service did not answer in time" : " failed unexpectedly"));
+            outcome = timedOut ? "timeout" : "error";
         }
         meters.counter("tool.call", "tool", tool, "outcome", outcome).increment();
         log.debug("tool {} -> {} on thread {}", tool, outcome, Thread.currentThread().getName());

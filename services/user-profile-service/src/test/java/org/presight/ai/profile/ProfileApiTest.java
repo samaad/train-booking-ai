@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.presight.ai.common.security.testing.TestIssuer;
 import org.presight.ai.common.kafka.Topics;
 import org.presight.ai.common.kafka.events.OtherEvents.ProfileUpdated;
 import org.presight.ai.common.kafka.testing.KafkaTestSupport;
@@ -47,8 +48,7 @@ public class ProfileApiTest {
 
     @DynamicPropertySource
     static void oidc(DynamicPropertyRegistry registry) {
-        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", issuer::issuer);
-        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", issuer::jwksUri);
+        issuer.register(registry);
     }
 
     @AfterAll
@@ -71,9 +71,19 @@ public class ProfileApiTest {
 
     @Test
     void rejectsExpiredForeignAndForgedTokens() {
-        bearer(issuer.expiredToken("mallory")).get().uri("/me").exchange().expectStatus().isUnauthorized();
-        bearer(issuer.tokenFromOtherIssuer("mallory")).get().uri("/me").exchange().expectStatus().isUnauthorized();
-        bearer(issuer.forgedToken("mallory")).get().uri("/me").exchange().expectStatus().isUnauthorized();
+        bearer(issuer.expired("mallory")).get().uri("/me").exchange().expectStatus().isUnauthorized();
+        bearer(issuer.otherIssuer("mallory")).get().uri("/me").exchange().expectStatus().isUnauthorized();
+        bearer(issuer.forged("mallory")).get().uri("/me").exchange().expectStatus().isUnauthorized();
+        bearer(issuer.wrongAudience("mallory")).get().uri("/me").exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void scopesLimitWhatAValidTokenMayDo() {
+        WebTestClient readOnly = bearer(issuer.withScopes("reader-" + UUID.randomUUID(), "profile:read"));
+        readOnly.get().uri("/me").exchange().expectStatus().isOk();
+        readOnly.put().uri("/me").bodyValue(update(0, "WINDOW")).exchange().expectStatus().isForbidden();
+        bearer(issuer.withScopes("nobody-" + UUID.randomUUID(), "booking:read")).get().uri("/me").exchange()
+                .expectStatus().isForbidden();
     }
 
     @Test
@@ -159,7 +169,7 @@ public class ProfileApiTest {
     }
 
     private WebTestClient as(String subject, String name, String email) {
-        return bearer(issuer.token(subject, name, email));
+        return bearer(issuer.passenger(subject, Map.of("name", name, "email", email)));
     }
 
     private WebTestClient bearer(String token) {

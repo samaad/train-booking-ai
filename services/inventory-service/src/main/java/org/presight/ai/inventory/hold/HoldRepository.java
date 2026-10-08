@@ -23,7 +23,7 @@ class HoldRepository {
     private static final String CLAIMABLE = "(status = 'AVAILABLE' OR (status = 'HELD' AND hold_expires_at < now()))";
 
     private static final String HOLD_COLUMNS = """
-            id, train_number, travel_date, fare_class, seat_no, expires_at, request_hash,
+            id, train_number, travel_date, fare_class, seat_no, expires_at, request_hash, user_id,
             CASE WHEN status = 'ACTIVE' AND expires_at <= now() THEN 'EXPIRED' ELSE status END AS effective_status
             """;
 
@@ -93,12 +93,12 @@ class HoldRepository {
     }
 
     Mono<Hold> insertHold(UUID holdId, String train, LocalDate date, ClaimedSeat seat,
-                          String idempotencyKey, String requestHash) {
+                          String idempotencyKey, String requestHash, String userId) {
         return db.sql("""
                         INSERT INTO seat_hold (id, seat_id, train_number, travel_date, fare_class, seat_no,
-                                               status, expires_at, idempotency_key, request_hash)
+                                               status, expires_at, idempotency_key, request_hash, user_id)
                         VALUES (:id, :seatId, :train, :date, :fareClass, :seatNo,
-                                'ACTIVE', :expiresAt, :key, :hash)
+                                'ACTIVE', :expiresAt, :key, :hash, :userId)
                         """)
                 .bind("id", holdId)
                 .bind("seatId", seat.seatId())
@@ -109,6 +109,7 @@ class HoldRepository {
                 .bind("expiresAt", seat.expiresAt())
                 .bind("key", idempotencyKey)
                 .bind("hash", requestHash)
+                .bind("userId", userId)
                 .then()
                 .then(findById(holdId));
     }
@@ -205,6 +206,7 @@ class HoldRepository {
                 row.get("seat_no", String.class),
                 HoldStatus.valueOf(row.get("effective_status", String.class)),
                 row.get("expires_at", OffsetDateTime.class).toInstant(),
-                row.get("request_hash", String.class));
+                row.get("request_hash", String.class),
+                row.get("user_id", String.class));
     }
 }

@@ -14,6 +14,7 @@ import org.presight.ai.common.kafka.events.SeatEvents.SeatCommitted;
 import org.presight.ai.common.kafka.events.SeatEvents.SeatHeld;
 import org.presight.ai.common.kafka.events.SeatEvents.SeatReleased;
 import org.presight.ai.common.kafka.outbox.Outbox;
+import org.presight.ai.common.security.CallerIdentity;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
 import org.presight.ai.inventory.availability.SeatLayout;
 import org.presight.ai.inventory.config.InventoryProperties;
@@ -45,7 +46,7 @@ public class HoldService {
         this.holdTtl = properties.holdTtl();
     }
 
-    public record HoldCommand(String trainNumber, LocalDate travelDate, String fareClass, String seatNo) {
+    public record HoldCommand(String userId, String trainNumber, LocalDate travelDate, String fareClass, String seatNo) {
     }
 
     /**
@@ -53,15 +54,29 @@ public class HoldService {
      * never claims a second seat — that is what makes a client or AI-tool retry safe.
      */
     public Mono<Hold> hold(HoldCommand cmd, IdempotencyKey key) {
-        String fingerprint = RequestFingerprint.of(cmd.trainNumber(), cmd.travelDate(), cmd.fareClass(), cmd.seatNo());
+        // The owner is part of the fingerprint: another user's request with the same key is a reuse, never a replay
+        // that hands them someone else's hold.
+        String fingerprint = RequestFingerprint.of(cmd.userId(), cmd.trainNumber(), cmd.travelDate(), cmd.fareClass(), cmd.seatNo());
         return layout.ensureSeats(cmd.trainNumber(), cmd.travelDate(), cmd.fareClass())
                 .then(holds.findByIdempotencyKey(key.value()))
                 .map(existing -> replay(existing, fingerprint))
                 .switchIfEmpty(Mono.defer(() -> claim(cmd, key, fingerprint)));
     }
 
-    public Mono<Hold> find(UUID holdId) {
-        return holds.findById(holdId).switchIfEmpty(Mono.error(() -> holdNotFound(holdId)));
+    /** Owner, staff or a service; anyone else gets 404 — a hold id is not an existence oracle. */
+    public Mono<Hold> find(UUID holdId, CallerIdentity caller) {
+        return holds.findById(holdId)
+                .filter(h -> mayAccess(h, caller))
+                .switchIfEmpty(Mono.error(() -> holdNotFound(holdId)));
+    }
+
+    /** Owner or staff only. */
+    public Mono<Void> release(UUID holdId, CallerIdentity caller) {
+        return find(holdId, caller).then(release(holdId));
+    }
+
+    private static boolean mayAccess(Hold hold, CallerIdentity caller) {
+        return caller.hasRole("SERVICE") || caller.mayAccess(hold.userId());
     }
 
     /** Idempotent: committing an already-committed hold returns it unchanged. */
@@ -138,7 +153,7 @@ public class HoldService {
                         .switchIfEmpty(Mono.defer(() -> seatNotClaimable(cmd)));
 
         Mono<Hold> attempt = seat
-                .flatMap(s -> holds.insertHold(holdId, cmd.trainNumber(), cmd.travelDate(), s, key.value(), fingerprint))
+                .flatMap(s -> holds.insertHold(holdId, cmd.trainNumber(), cmd.travelDate(), s, key.value(), fingerprint, cmd.userId()))
                 .flatMap(h -> outbox.append(Topics.SEAT_HELD, new SeatHeld(UuidV7.generate(), h.id(), h.trainNumber(),
                         h.travelDate(), h.fareClass(), h.seatNo(), h.expiresAt(), Instant.now())).thenReturn(h))
                 .as(tx::transactional);

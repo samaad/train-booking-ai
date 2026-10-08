@@ -32,7 +32,7 @@ class BookingEventsListener {
 
     @KafkaListener(topics = Topics.BOOKING_CONFIRMED)
     void onBookingConfirmed(ConsumerRecord<String, String> record) {
-        handler.handle(record, BookingConfirmed.class, e -> tickets.issue(new IssueTicket(e.bookingId(), e.pnr(),
+        handler.handle(record, BookingConfirmed.class, e -> tickets.issue(new IssueTicket(e.bookingId(), e.userId(), e.pnr(),
                 e.passengerName(), e.trainNumber(), e.travelDate(), e.fareClass(), e.seatNo(), e.fromStation(),
                 e.toStation(), e.departure())));
     }

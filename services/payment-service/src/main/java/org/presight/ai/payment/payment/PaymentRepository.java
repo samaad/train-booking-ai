@@ -70,15 +70,16 @@ class PaymentRepository {
                 .rowsUpdated();
     }
 
-    record Charge(UUID bookingId, BigDecimal amount, String currency, boolean cancelled) {
+    record Charge(UUID bookingId, String userId, BigDecimal amount, String currency, boolean cancelled) {
     }
 
-    Mono<Void> upsertCharge(UUID bookingId, BigDecimal amount, String currency) {
+    Mono<Void> upsertCharge(UUID bookingId, String userId, BigDecimal amount, String currency) {
         return db.sql("""
-                        INSERT INTO booking_charge (booking_id, amount, currency) VALUES (:id, :amount, :currency)
+                        INSERT INTO booking_charge (booking_id, user_id, amount, currency) VALUES (:id, :userId, :amount, :currency)
                         ON CONFLICT (booking_id) DO NOTHING
                         """)
                 .bind("id", bookingId)
+                .bind("userId", Parameters.in(R2dbcType.VARCHAR, userId))
                 .bind("amount", amount)
                 .bind("currency", currency)
                 .then();
@@ -87,7 +88,7 @@ class PaymentRepository {
     Mono<Charge> findCharge(UUID bookingId) {
         return db.sql("SELECT * FROM booking_charge WHERE booking_id = :id")
                 .bind("id", bookingId)
-                .map(r -> new Charge(r.get("booking_id", UUID.class), r.get("amount", BigDecimal.class),
+                .map(r -> new Charge(r.get("booking_id", UUID.class), r.get("user_id", String.class), r.get("amount", BigDecimal.class),
                         r.get("currency", String.class), "CANCELLED".equals(r.get("status", String.class))))
                 .one();
     }

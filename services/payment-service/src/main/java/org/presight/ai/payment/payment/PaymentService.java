@@ -15,6 +15,7 @@ import org.presight.ai.common.kafka.events.PaymentEvents.PaymentAuthorized;
 import org.presight.ai.common.kafka.events.PaymentEvents.PaymentFailed;
 import org.presight.ai.common.kafka.events.PaymentEvents.PaymentRefunded;
 import org.presight.ai.common.kafka.outbox.Outbox;
+import org.presight.ai.common.security.CallerIdentity;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
 import org.presight.ai.payment.payment.PaymentIntent.Status;
 import org.presight.ai.payment.payment.PaymentRepository.Charge;
@@ -63,12 +64,12 @@ public class PaymentService {
     public record Authorize(UUID bookingId, BigDecimal amount, String currency, String paymentToken) {
     }
 
-    public Mono<PaymentIntent> authorize(Authorize cmd, IdempotencyKey key) {
+    public Mono<PaymentIntent> authorize(Authorize cmd, IdempotencyKey key, CallerIdentity caller) {
         BigDecimal amount = cmd.amount().setScale(2, RoundingMode.UNNECESSARY);
-        String fingerprint = RequestFingerprint.of(cmd.bookingId(), amount.toPlainString(), cmd.currency(), cmd.paymentToken());
+        String fingerprint = RequestFingerprint.of(caller.userId(), cmd.bookingId(), amount.toPlainString(), cmd.currency(), cmd.paymentToken());
         return payments.findByIdempotencyKey(key.value())
                 .flatMap(existing -> drive(replay(existing, fingerprint)))
-                .switchIfEmpty(Mono.defer(() -> payable(cmd.bookingId(), amount, cmd.currency())
+                .switchIfEmpty(Mono.defer(() -> payable(cmd.bookingId(), amount, cmd.currency(), caller)
                         .then(payments.insertPending(UuidV7.generate(), cmd.bookingId(), amount, cmd.currency(),
                                 cmd.paymentToken(), key.value(), fingerprint))
                         .onErrorResume(e -> violates(e, "uq_payment_idempotency_key"),
@@ -79,12 +80,15 @@ public class PaymentService {
                         .flatMap(this::drive)));
     }
 
-    /** Only the amount booking-service computed, and only while the booking is open. */
-    private Mono<Void> payable(UUID bookingId, BigDecimal amount, String currency) {
+    /** Only the booking's owner (or staff), only the amount booking-service computed, only while it is open. */
+    private Mono<Void> payable(UUID bookingId, BigDecimal amount, String currency, CallerIdentity caller) {
         return payments.findCharge(bookingId)
                 .switchIfEmpty(Mono.error(() -> new DomainException(ErrorCategory.UNAVAILABLE, "PAYMENT_NOT_READY",
                         "Booking " + bookingId + " is not payable yet; retry with the same Idempotency-Key")))
                 .flatMap(charge -> {
+                    if (charge.userId() != null && !caller.mayAccess(charge.userId())) {
+                        return Mono.error(DomainException.notFound("BOOKING_NOT_FOUND", "No booking " + bookingId));
+                    }
                     if (charge.cancelled()) {
                         return Mono.error(DomainException.conflict("BOOKING_CANCELLED", "Booking " + bookingId + " is cancelled"));
                     }
@@ -120,8 +124,8 @@ public class PaymentService {
 
     // ------------------------------------------------------------------ saga reactions (from Kafka)
 
-    Mono<Void> bookingCreated(UUID bookingId, BigDecimal amount, String currency) {
-        return payments.upsertCharge(bookingId, amount, currency);
+    Mono<Void> bookingCreated(UUID bookingId, String userId, BigDecimal amount, String currency) {
+        return payments.upsertCharge(bookingId, userId, amount, currency);
     }
 
     /** Compensation: no further charges, and an authorised payment is refunded. */

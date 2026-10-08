@@ -60,7 +60,10 @@ final class DownstreamStub {
                                         .sendString(Mono.just("{\"status\":404,\"code\":\"HOLD_NOT_FOUND\",\"detail\":\"No hold\"}")).then()
                                 : json(null, res, hold);
                     })
-                    .get("/bookings/{id}", (req, res) -> json(record(req), res, bookingJson.formatted(req.param("id")))))
+                    .get("/bookings/{id}", (req, res) -> bookingJson == null
+                            ? res.status(404).header("Content-Type", "application/problem+json").sendString(Mono.just(
+                                    "{\"status\":404,\"code\":\"BOOKING_NOT_FOUND\",\"detail\":\"No booking\"}")).then()
+                            : json(record(req), res, bookingJson.formatted(req.param("id")))))
             .bindNow();
 
     String baseUrl() {

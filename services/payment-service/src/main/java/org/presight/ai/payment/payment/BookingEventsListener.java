@@ -28,7 +28,7 @@ class BookingEventsListener {
 
     @KafkaListener(topics = Topics.BOOKING_CREATED)
     void onBookingCreated(ConsumerRecord<String, String> record) {
-        handler.handle(record, BookingCreated.class, e -> payments.bookingCreated(e.bookingId(), e.amount(), e.currency()));
+        handler.handle(record, BookingCreated.class, e -> payments.bookingCreated(e.bookingId(), e.userId(), e.amount(), e.currency()));
     }
 
     @KafkaListener(topics = Topics.BOOKING_CANCELLED)

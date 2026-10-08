@@ -21,13 +21,14 @@ class TicketRepository {
     /** Inserts unless the booking already has a ticket; emits whether a row was inserted. */
     Mono<Boolean> insertIfAbsent(Ticket t) {
         return db.sql("""
-                        INSERT INTO ticket (id, pnr, booking_id, status, passenger_name, train_number, travel_date,
+                        INSERT INTO ticket (id, user_id, pnr, booking_id, status, passenger_name, train_number, travel_date,
                                             fare_class, seat_no, from_station, to_station, departure, qr_token)
-                        VALUES (:id, :pnr, :bookingId, 'ISSUED', :passenger, :train, :date,
+                        VALUES (:id, :userId, :pnr, :bookingId, 'ISSUED', :passenger, :train, :date,
                                 :fareClass, :seatNo, :from, :to, :departure, :qr)
                         ON CONFLICT ON CONSTRAINT uq_ticket_booking DO NOTHING
                         """)
                 .bind("id", t.id())
+                .bind("userId", io.r2dbc.spi.Parameters.in(io.r2dbc.spi.R2dbcType.VARCHAR, t.userId()))
                 .bind("pnr", t.pnr())
                 .bind("bookingId", t.bookingId())
                 .bind("passenger", t.passengerName())
@@ -83,6 +84,7 @@ class TicketRepository {
         OffsetDateTime voided = row.get("voided_at", OffsetDateTime.class);
         return new Ticket(
                 row.get("id", UUID.class),
+                row.get("user_id", String.class),
                 row.get("pnr", String.class),
                 row.get("booking_id", UUID.class),
                 Status.valueOf(row.get("status", String.class)),

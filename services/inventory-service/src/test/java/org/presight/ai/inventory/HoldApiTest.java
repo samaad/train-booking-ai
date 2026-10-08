@@ -19,10 +19,23 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 @Import(TestcontainersConfiguration.class)
 class HoldApiTest {
 
+    @org.springframework.test.context.DynamicPropertySource
+    static void oidc(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        Tokens.ISSUER.register(registry);
+    }
+
+
     private static final LocalDate DATE = LocalDate.now(ZoneId.of("Asia/Dubai")).plusDays(7);
 
-    @Autowired
     WebTestClient client;
+
+    @Autowired
+    void client(WebTestClient raw) {
+        this.raw = raw;
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + Tokens.PASSENGER).build();
+    }
+
+    WebTestClient raw;
 
     @Autowired
     DatabaseClient db;
@@ -52,12 +65,12 @@ class HoldApiTest {
         client.get().uri("/availability?trainNumber=ER102&travelDate={d}", DATE).exchange()
                 .expectBody().jsonPath("$.classes[0].available").isEqualTo(11);
 
-        client.post().uri("/holds/{id}/commit", holdId).exchange()
+        asService().post().uri("/holds/{id}/commit", holdId).exchange()
                 .expectStatus().isOk()
                 .expectBody().jsonPath("$.status").isEqualTo("COMMITTED");
 
         // Idempotent re-commit; and a committed seat cannot be released through the hold.
-        client.post().uri("/holds/{id}/commit", holdId).exchange()
+        asService().post().uri("/holds/{id}/commit", holdId).exchange()
                 .expectStatus().isOk().expectBody().jsonPath("$.status").isEqualTo("COMMITTED");
         client.delete().uri("/holds/{id}", holdId).exchange()
                 .expectStatus().isEqualTo(409)
@@ -72,7 +85,7 @@ class HoldApiTest {
         client.delete().uri("/holds/{id}", holdId).exchange().expectStatus().isNoContent();
         client.get().uri("/holds/{id}", holdId).exchange()
                 .expectBody().jsonPath("$.status").isEqualTo("RELEASED");
-        client.post().uri("/holds/{id}/commit", holdId).exchange()
+        asService().post().uri("/holds/{id}/commit", holdId).exchange()
                 .expectStatus().isEqualTo(409).expectBody().jsonPath("$.code").isEqualTo("HOLD_RELEASED");
 
         hold("ER102", "ECONOMY", "E7", key()).expectStatus().isCreated();
@@ -99,11 +112,11 @@ class HoldApiTest {
         client.get().uri("/holds/{id}", stale).exchange().expectBody().jsonPath("$.status").isEqualTo("EXPIRED");
         String fresh = holdIdOf(hold("ER201", "BUSINESS", "B1", key()).expectStatus().isCreated());
 
-        client.post().uri("/holds/{id}/commit", stale).exchange()
+        asService().post().uri("/holds/{id}/commit", stale).exchange()
                 .expectStatus().isEqualTo(409).expectBody().jsonPath("$.code").isEqualTo("HOLD_EXPIRED");
         // Releasing the stale hold must not free the seat the fresh hold now owns.
         client.delete().uri("/holds/{id}", stale).exchange().expectStatus().isNoContent();
-        client.post().uri("/holds/{id}/commit", fresh).exchange().expectStatus().isOk();
+        asService().post().uri("/holds/{id}/commit", fresh).exchange().expectStatus().isOk();
     }
 
     @Test
@@ -133,6 +146,56 @@ class HoldApiTest {
                 .exchange().expectStatus().isEqualTo(422)
                 .expectBody().jsonPath("$.code").isEqualTo("TRAVEL_DATE_OUT_OF_RANGE");
         client.get().uri("/holds/{id}", UUID.randomUUID()).exchange().expectStatus().isNotFound();
+    }
+
+    @Test
+    void holdsArePrivateToTheirOwner() {
+        String holdId = holdIdOf(hold("ER201", "ECONOMY", "E30", key()).expectStatus().isCreated());
+        WebTestClient other = as(Tokens.ISSUER.passenger("user-2"));
+
+        other.get().uri("/holds/{id}", holdId).exchange().expectStatus().isNotFound(); // not 403: no oracle
+        other.delete().uri("/holds/{id}", holdId).exchange().expectStatus().isNotFound();
+        as(Tokens.ISSUER.withRoles("desk-1", "AGENT")).get().uri("/holds/{id}", holdId).exchange().expectStatus().isOk();
+        client.get().uri("/holds/{id}", holdId).exchange().expectStatus().isOk();
+    }
+
+    @Test
+    void onlyTheBookingSagaMayCommitASeat() {
+        String holdId = holdIdOf(hold("ER201", "ECONOMY", "E31", key()).expectStatus().isCreated());
+
+        client.post().uri("/holds/{id}/commit", holdId).exchange().expectStatus().isForbidden(); // keep a seat unpaid? no
+        asService().post().uri("/holds/{id}/commit", holdId).exchange().expectStatus().isOk();
+    }
+
+    @Test
+    void tokensAndScopesAreRequired() {
+        raw.get().uri("/availability?trainNumber=ER201&travelDate={d}", DATE).exchange().expectStatus().isOk(); // public
+        raw.post().uri("/holds").header("Idempotency-Key", key())
+                .bodyValue(Map.of("trainNumber", "ER201", "travelDate", DATE.toString(), "fareClass", "ECONOMY"))
+                .exchange().expectStatus().isUnauthorized();
+        as(Tokens.ISSUER.withScopes("user-3", "booking:read")).post().uri("/holds").header("Idempotency-Key", key())
+                .bodyValue(Map.of("trainNumber", "ER201", "travelDate", DATE.toString(), "fareClass", "ECONOMY"))
+                .exchange().expectStatus().isForbidden();
+        as(Tokens.ISSUER.expired("user-1")).get().uri("/holds/{id}", UUID.randomUUID()).exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void anotherUsersIdempotencyKeyNeverReplaysTheirHold() {
+        String key = key();
+        hold("ER201", "ECONOMY", "E32", key).expectStatus().isCreated();
+
+        as(Tokens.ISSUER.passenger("user-2")).post().uri("/holds").header("Idempotency-Key", key)
+                .bodyValue(Map.of("trainNumber", "ER201", "travelDate", DATE.toString(), "fareClass", "ECONOMY", "seatNo", "E32"))
+                .exchange().expectStatus().isEqualTo(422)
+                .expectBody().jsonPath("$.code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
+    }
+
+    private WebTestClient as(String token) {
+        return raw.mutate().defaultHeader("Authorization", "Bearer " + token).build();
+    }
+
+    private WebTestClient asService() {
+        return as(Tokens.SERVICE);
     }
 
     private WebTestClient.ResponseSpec hold(String train, String fareClass, String seatNo, String key) {

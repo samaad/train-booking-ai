@@ -15,7 +15,11 @@ import org.presight.ai.booking.booking.Booking.SagaState;
 import org.presight.ai.booking.booking.Booking.Status;
 import org.presight.ai.booking.booking.BookingService.CreateBooking;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
+import org.presight.ai.common.security.CallerIdentity;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -63,23 +67,29 @@ public class BookingController {
 
     /** A replayed Idempotency-Key returns the original booking with 201 again. */
     @PostMapping
+    @PreAuthorize("hasAuthority('SCOPE_booking:write')")
     public Mono<ResponseEntity<BookingResponse>> create(
+            @AuthenticationPrincipal Jwt jwt,
             @RequestHeader(IdempotencyKeyHeader.NAME) String idempotencyKey,
             @Valid @RequestBody BookingRequest request) {
+        CallerIdentity caller = CallerIdentity.of(jwt);
         return Mono.fromCallable(() -> IdempotencyKeyHeader.parse(idempotencyKey))
                 .flatMap(key -> service.create(new CreateBooking(request.holdId(), request.fromStation(),
-                        request.toStation(), request.passengerName(), request.contactEmail()), key))
+                        request.toStation(), request.passengerName(), request.contactEmail()), key, caller))
                 .map(b -> ResponseEntity.created(URI.create("/bookings/" + b.id())).body(BookingResponse.of(b)));
     }
 
     @GetMapping("/{bookingId}")
-    public Mono<BookingResponse> get(@PathVariable UUID bookingId) {
-        return service.find(bookingId).map(BookingResponse::of);
+    @PreAuthorize("hasAuthority('SCOPE_booking:read')")
+    public Mono<BookingResponse> get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID bookingId) {
+        return service.find(bookingId, CallerIdentity.of(jwt)).map(BookingResponse::of);
     }
 
     @PostMapping("/{bookingId}/cancel")
-    public Mono<BookingResponse> cancel(@PathVariable UUID bookingId,
+    @PreAuthorize("hasAuthority('SCOPE_booking:write')")
+    public Mono<BookingResponse> cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID bookingId,
                                         @Valid @RequestBody(required = false) CancelRequest request) {
-        return service.cancel(bookingId, request == null ? null : request.reason()).map(BookingResponse::of);
+        return service.cancel(bookingId, request == null ? null : request.reason(), CallerIdentity.of(jwt))
+                .map(BookingResponse::of);
     }
 }

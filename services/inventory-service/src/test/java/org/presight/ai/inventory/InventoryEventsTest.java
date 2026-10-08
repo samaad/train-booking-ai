@@ -33,10 +33,24 @@ import org.testcontainers.kafka.KafkaContainer;
 @Import(TestcontainersConfiguration.class)
 class InventoryEventsTest {
 
+    @org.springframework.test.context.DynamicPropertySource
+    static void oidc(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        Tokens.ISSUER.register(registry);
+    }
+
+
     private static final LocalDate DATE = LocalDate.now(ZoneId.of("Asia/Dubai")).plusDays(21);
     private static final Duration WAIT = Duration.ofSeconds(20);
 
-    @Autowired WebTestClient client;
+    WebTestClient client;
+
+    @Autowired
+    void client(WebTestClient raw) {
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + Tokens.PASSENGER).build();
+        this.service = raw.mutate().defaultHeader("Authorization", "Bearer " + Tokens.SERVICE).build();
+    }
+
+    WebTestClient service;
     @Autowired DatabaseClient db;
     @Autowired KafkaContainer kafka;
 
@@ -64,14 +78,14 @@ class InventoryEventsTest {
         assertThat(held.key()).isEqualTo("ER202:" + DATE);
         assertThat(held.seatNo()).isEqualTo("B2");
 
-        client.post().uri("/holds/{id}/commit", holdId).exchange().expectStatus().isOk();
+        service.post().uri("/holds/{id}/commit", holdId).exchange().expectStatus().isOk();
         events.await(Topics.SEAT_COMMITTED, SeatCommitted.class, e -> e.holdId().equals(holdId), WAIT);
     }
 
     @Test
     void aCancelledBookingReleasesItsCommittedSeatOnce() {
         UUID holdId = hold("B3");
-        client.post().uri("/holds/{id}/commit", holdId).exchange().expectStatus().isOk();
+        service.post().uri("/holds/{id}/commit", holdId).exchange().expectStatus().isOk();
         BookingCancelled cancelled = new BookingCancelled(UUID.randomUUID(), UUID.randomUUID(), "ABC234", holdId,
                 CancelReason.USER, "plans changed", Instant.now());
 

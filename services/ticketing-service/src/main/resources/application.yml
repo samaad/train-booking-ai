@@ -12,12 +12,24 @@ spring:
     user: ${DB_USER:ticketing}
     password: ${DB_PASSWORD:ticketing}
     locations: classpath:db/migration,classpath:db/outbox
+    # Two independent migration streams (this service's V1.. and the shared outbox V1000): a later V3 sorts
+    # below the applied V1000, so out-of-order application must be allowed. They never touch the same tables.
+    out-of-order: true
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
     consumer:
       group-id: ticketing-service
     listener:
       ack-mode: record
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Keycloak realm train-booking. Both set: keys come lazily from the JWK set (rotating), and tokens
+          # must carry exactly this issuer. No discovery call at startup.
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/train-booking}
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8180/realms/train-booking/protocol/openid-connect/certs}
+          audiences: train-api
 
 server:
   port: ${PORT:8085}

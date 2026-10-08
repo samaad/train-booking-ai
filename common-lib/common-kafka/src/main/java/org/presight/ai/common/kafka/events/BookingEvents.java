@@ -14,9 +14,10 @@ public final class BookingEvents {
 
     /**
      * Saga entry. Carries everything downstream needs so consumers never call back synchronously:
-     * payment learns the authoritative amount, notification the contact address.
+     * payment learns the authoritative amount, notification the contact address. {@code userId} is the
+     * booking's owner (JWT subject): payment only accepts that user's payment, ticketing shows only them the ticket.
      */
-    public record BookingCreated(UUID eventId, UUID bookingId, String pnr, UUID holdId, String trainNumber,
+    public record BookingCreated(UUID eventId, UUID bookingId, String userId, String pnr, UUID holdId, String trainNumber,
                                  LocalDate travelDate, String fareClass, String seatNo, String fromStation,
                                  String toStation, OffsetDateTime departure, String passengerName,
                                  String contactEmail, BigDecimal amount, String currency, Instant occurredAt)
@@ -25,7 +26,7 @@ public final class BookingEvents {
     }
 
     /** Payment authorised and seat committed. Ticketing issues on this. */
-    public record BookingConfirmed(UUID eventId, UUID bookingId, String pnr, UUID holdId, String trainNumber,
+    public record BookingConfirmed(UUID eventId, UUID bookingId, String userId, String pnr, UUID holdId, String trainNumber,
                                    LocalDate travelDate, String fareClass, String seatNo, String fromStation,
                                    String toStation, OffsetDateTime departure, String passengerName, Instant occurredAt)
             implements Event {

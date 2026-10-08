@@ -12,6 +12,7 @@ import org.presight.ai.assistant.security.Caller;
 import org.presight.ai.common.error.DomainException;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,6 +49,7 @@ public class ChatController {
     }
 
     @PostMapping(path = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasAuthority('SCOPE_ai:chat')")
     public Flux<ServerSentEvent<ChatEvent>> chat(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ChatRequest request) {
         Caller caller = Caller.of(jwt);
         return orchestrator.chat(caller, request.conversationId(), request.message())
@@ -55,12 +57,14 @@ public class ChatController {
     }
 
     @GetMapping("/conversations")
+    @PreAuthorize("hasAuthority('SCOPE_ai:chat')")
     public Flux<ConversationSummary> conversations(@AuthenticationPrincipal Jwt jwt) {
         return conversations.listOwned(jwt.getSubject(), 50)
                 .map(c -> new ConversationSummary(c.id(), c.title(), c.updatedAt()));
     }
 
     @GetMapping("/conversations/{conversationId}/messages")
+    @PreAuthorize("hasAuthority('SCOPE_ai:chat')")
     public Flux<MessageView> messages(@AuthenticationPrincipal Jwt jwt, @PathVariable String conversationId) {
         return conversations.findOwned(conversationId, jwt.getSubject())
                 .switchIfEmpty(Mono.error(() -> DomainException.notFound("CONVERSATION_NOT_FOUND", "No conversation " + conversationId)))

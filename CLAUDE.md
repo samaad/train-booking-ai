@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** all 8 services built and tested. **Kafka events are wired (Phase 3)**: transactional outbox + relay, idempotent consumers, choreographed saga with compensations, hold-expiry sweeper — verified end to end in compose. Not yet: Kafka Streams (Phase 6), Keycloak realm / PKCE / Kong auth (Phase 4), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** Phases 0–5 built. Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Not yet: React/mobile frontends, Kafka Streams + observability (Phase 6), K8s (Phase 7), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -31,6 +31,16 @@ These were verified against Maven Central and bytecode, and are costly to redisc
 - MinIO publishes no community images any more; the object store is `adobe/s3mock` locally (S3 API, AWS SDK v2 async client). Exclude `apache-client`/`apache5-client`/`url-connection-client` from `software.amazon.awssdk:s3`.
 - Jackson is **3.x** (`tools.jackson.*`). Decoding normalises `OffsetDateTime` to UTC — convert to the railway zone before showing times to the LLM, or it narrates "03:55" for a 07:55 departure.
 - **Never call `UUID.randomUUID()` / default `SecureRandom` on an event loop**: NativePRNG reads `/dev/urandom` (blocking file I/O). `UuidV7` uses DRBG for this reason.
+
+### Security (common-security) — conventions
+
+- Every service builds its chain with `ResourceServerSecurity.build(http, rules)`; scopes/roles go on handlers as `@PreAuthorize` (e.g. `SCOPE_booking:write`, `hasRole('SERVICE')`). Keycloak roles map from `realm_access.roles` → `ROLE_*`, scopes → `SCOPE_*` (`KeycloakAuthorities`). Tokens must have `aud=train-api`.
+- **Ownership**: records carry `user_id` (JWT `sub`); a non-owner gets **404, never 403** (`CallerIdentity.mayAccess`, staff = AGENT/SUPPORT/ADMIN). The owner travels in `booking.created/confirmed` so payment and ticketing enforce it without calling booking. Include the caller in idempotency fingerprints.
+- **Relay the user's token** when a user is behind a call; use `ServiceTokens.call(...)` (client credentials, role SERVICE) only when nobody is — e.g. the saga's seat commit. `call` renews and retries once on 401.
+- Realm: edit `infra/keycloak/build-realm.sh` and re-run it (it exports `realm-export.json`) — never hand-edit the JSON. Dev users aisha/omar/agent/admin, password `Passw0rd-dev`. Issuer is always `http://localhost:8180/realms/train-booking` (`KC_HOSTNAME`); services fetch JWKS/tokens via `keycloak:8080`.
+- Keycloak 26 drops undeclared user attributes (declare them in the user profile); its session cookies are `Secure`+`SameSite=None` (fine for browsers on localhost, not for naive scripts).
+- **Disable Spring Cloud's implicit HTTP-client circuit breakers** (`spring.cloud.circuitbreaker.reactive-http-services.enabled: false`) wherever the resilience4j starter is present: it hides real errors as `NoFallbackAvailableException` and lets callers' 4xx trip breakers for everyone.
+- Flyway: services set `out-of-order: true` — the shared outbox migration is V1000, so later per-service V3+ must apply after it.
 
 ### Events (common-kafka) — conventions
 

@@ -14,6 +14,15 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       timeout: 500ms
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Keycloak realm train-booking. Both set: keys come lazily from the JWK set (rotating), and tokens
+          # must carry exactly this issuer. No discovery call at startup.
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/train-booking}
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8180/realms/train-booking/protocol/openid-connect/certs}
+          audiences: train-api
 
 server:
   port: ${PORT:8081}

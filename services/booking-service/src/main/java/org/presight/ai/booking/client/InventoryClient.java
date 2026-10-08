@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.PostExchange;
@@ -21,10 +22,14 @@ public interface InventoryClient {
         }
     }
 
+    /** Called with the <em>user's</em> token: inventory only shows a user their own hold. */
     @GetExchange("/holds/{holdId}")
-    Mono<HoldView> getHold(@PathVariable UUID holdId);
+    Mono<HoldView> getHold(@RequestHeader("Authorization") String authorization, @PathVariable UUID holdId);
 
-    /** Idempotent in inventory (re-committing a committed hold returns it), so a redelivered saga event may call it again. */
+    /**
+     * Called with booking-service's own service token (inventory allows only SERVICE to commit). Idempotent in
+     * inventory, so a redelivered saga event may call it again.
+     */
     @PostExchange("/holds/{holdId}/commit")
-    Mono<HoldView> commit(@PathVariable UUID holdId);
+    Mono<HoldView> commit(@RequestHeader("Authorization") String authorization, @PathVariable UUID holdId);
 }

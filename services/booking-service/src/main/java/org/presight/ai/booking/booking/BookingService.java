@@ -18,6 +18,7 @@ import org.presight.ai.common.kafka.events.BookingEvents.BookingCancelled;
 import org.presight.ai.common.kafka.events.BookingEvents.BookingCreated;
 import org.presight.ai.common.kafka.events.BookingEvents.CancelReason;
 import org.presight.ai.common.kafka.outbox.Outbox;
+import org.presight.ai.common.security.CallerIdentity;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
 import org.presight.ai.common.web.RemoteCallErrors;
 import org.springframework.dao.DuplicateKeyException;
@@ -55,25 +56,29 @@ public class BookingService {
      * hold, never from the request, and the price is computed here from catalog's fare rule.
      * A repeated Idempotency-Key returns the original booking instead of creating a second one.
      */
-    public Mono<Booking> create(CreateBooking cmd, IdempotencyKey key) {
-        String fingerprint = RequestFingerprint.of(
+    public Mono<Booking> create(CreateBooking cmd, IdempotencyKey key, CallerIdentity caller) {
+        // The owner is part of the fingerprint: another user reusing a key gets 422, never this booking.
+        String fingerprint = RequestFingerprint.of(caller.userId(),
                 cmd.holdId(), cmd.fromStation(), cmd.toStation(), cmd.passengerName(), cmd.contactEmail());
         return bookings.findByIdempotencyKey(key.value())
                 .map(existing -> replay(existing, fingerprint))
-                .switchIfEmpty(Mono.defer(() -> price(cmd)
-                        .flatMap(draft -> insert(draft, cmd, key, fingerprint))));
+                .switchIfEmpty(Mono.defer(() -> price(cmd, caller)
+                        .flatMap(draft -> insert(draft, cmd, key, fingerprint, caller.userId()))));
     }
 
-    public Mono<Booking> find(UUID id) {
-        return bookings.findById(id).switchIfEmpty(Mono.error(() -> notFound(id)));
+    /** Owner or staff; anyone else gets 404 — a booking id is not an existence oracle. */
+    public Mono<Booking> find(UUID id, CallerIdentity caller) {
+        return bookings.findById(id)
+                .filter(b -> caller.mayAccess(b.userId()))
+                .switchIfEmpty(Mono.error(() -> notFound(id)));
     }
 
     /**
      * Idempotent. The cancellation and its {@code booking.cancelled.v1} commit together; inventory then
      * releases the seat, payment refunds and ticketing voids — compensations driven by that one event.
      */
-    public Mono<Booking> cancel(UUID id, String reason) {
-        return find(id).flatMap(booking -> booking.status() == Status.CANCELLED
+    public Mono<Booking> cancel(UUID id, String reason, CallerIdentity caller) {
+        return find(id, caller).flatMap(booking -> booking.status() == Status.CANCELLED
                 ? Mono.just(booking)
                 : bookings.cancel(id, booking.version(), reason)
                         .flatMap(rows -> rows == 0
@@ -91,8 +96,9 @@ public class BookingService {
     private record Priced(HoldView hold, JourneyView journey, FareRuleView rule) {
     }
 
-    private Mono<Priced> price(CreateBooking cmd) {
-        return inventory.getHold(cmd.holdId())
+    /** The hold is read with the caller's own token, so inventory refuses a hold that is not theirs. */
+    private Mono<Priced> price(CreateBooking cmd, CallerIdentity caller) {
+        return inventory.getHold(caller.authorization(), cmd.holdId())
                 .onErrorMap(RemoteCallErrors.from("inventory"))
                 .flatMap(hold -> {
                     if (!hold.isActive()) {
@@ -115,10 +121,10 @@ public class BookingService {
                 });
     }
 
-    private Mono<Booking> insert(Priced p, CreateBooking cmd, IdempotencyKey key, String fingerprint) {
+    private Mono<Booking> insert(Priced p, CreateBooking cmd, IdempotencyKey key, String fingerprint, String userId) {
         UUID id = UuidV7.generate();
         Mono<Booking> attempt = Mono.defer(() -> bookings.insert(new Booking(
-                id, Pnr.next(), p.hold().holdId(), Status.PENDING_PAYMENT, SagaState.PAYMENT_PENDING,
+                id, userId, Pnr.next(), p.hold().holdId(), Status.PENDING_PAYMENT, SagaState.PAYMENT_PENDING,
                 p.hold().trainNumber(), p.hold().travelDate(), p.hold().fareClass(), p.hold().seatNo(),
                 cmd.fromStation(), cmd.toStation(), p.journey().departure(), p.journey().arrival(),
                 cmd.passengerName(), cmd.contactEmail(),
@@ -139,7 +145,7 @@ public class BookingService {
     }
 
     private static BookingCreated created(Booking b) {
-        return new BookingCreated(UuidV7.generate(), b.id(), b.pnr(), b.holdId(), b.trainNumber(), b.travelDate(),
+        return new BookingCreated(UuidV7.generate(), b.id(), b.userId(), b.pnr(), b.holdId(), b.trainNumber(), b.travelDate(),
                 b.fareClass(), b.seatNo(), b.fromStation(), b.toStation(), b.departure(), b.passengerName(),
                 b.contactEmail(), b.amount(), b.currency(), Instant.now());
     }

@@ -37,6 +37,22 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @Import(TicketApiTest.Containers.class)
 public class TicketApiTest {
 
+    static final org.presight.ai.common.security.testing.TestIssuer issuer = new org.presight.ai.common.security.testing.TestIssuer();
+
+    @DynamicPropertySource
+    static void oidc(DynamicPropertyRegistry registry) {
+        issuer.register(registry);
+    }
+
+    WebTestClient raw;
+
+    @Autowired
+    void tokens(WebTestClient raw) {
+        this.raw = raw;
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.passenger("user-1")).build();
+    }
+
+
     @TestConfiguration(proxyBeanMethods = false)
     public static class Containers {
         @Bean
@@ -63,7 +79,6 @@ public class TicketApiTest {
         registry.add("ticketing.object-store.endpoint", () -> "http://" + s3.getHost() + ":" + s3.getMappedPort(9090));
     }
 
-    @Autowired
     WebTestClient client;
 
     @Autowired
@@ -144,6 +159,19 @@ public class TicketApiTest {
     }
 
     @Test
+    void ticketsArePrivateToTheirOwner() {
+        tickets.issue(command(UUID.randomUUID(), "WNR234")).block();
+        WebTestClient other = raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.passenger("user-2")).build();
+
+        client.get().uri("/tickets/WNR234").exchange().expectStatus().isOk(); // the owner sees it (so the 404s below mean something)
+        other.get().uri("/tickets/WNR234").exchange().expectStatus().isNotFound(); // a PNR is guessable: no oracle
+        other.get().uri("/tickets/WNR234/qr").exchange().expectStatus().isNotFound();
+        raw.get().uri("/tickets/WNR234").exchange().expectStatus().isUnauthorized();
+        raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.withRoles("desk-1", "SUPPORT")).build()
+                .get().uri("/tickets/WNR234").exchange().expectStatus().isOk();
+    }
+
+    @Test
     void unknownAndMalformedPnrsAre404() {
         client.get().uri("/tickets/ZZZ999").exchange()
                 .expectStatus().isNotFound()
@@ -152,7 +180,7 @@ public class TicketApiTest {
     }
 
     private static IssueTicket command(UUID booking, String pnr) {
-        return new IssueTicket(booking, pnr, "Aisha Khan", "ER101", LocalDate.now().plusDays(5), "BUSINESS", "B4",
+        return new IssueTicket(booking, "user-1", pnr, "Aisha Khan", "ER101", LocalDate.now().plusDays(5), "BUSINESS", "B4",
                 "DXB", "FUJ", OffsetDateTime.parse(LocalDate.now().plusDays(5) + "T07:55:00+04:00"));
     }
 }

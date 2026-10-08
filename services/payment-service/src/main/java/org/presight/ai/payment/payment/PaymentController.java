@@ -12,7 +12,11 @@ import java.util.UUID;
 import org.presight.ai.common.web.IdempotencyKeyHeader;
 import org.presight.ai.payment.payment.PaymentIntent.Status;
 import org.presight.ai.payment.payment.PaymentService.Authorize;
+import org.presight.ai.common.security.CallerIdentity;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -53,16 +57,21 @@ public class PaymentController {
      * replayed Idempotency-Key returns the same body. 503 means "unknown, retry with the same key".
      */
     @PostMapping
+    @PreAuthorize("hasAuthority('SCOPE_payment:write')")
     public Mono<ResponseEntity<PaymentResponse>> authorize(
+            @AuthenticationPrincipal Jwt jwt,
             @RequestHeader(IdempotencyKeyHeader.NAME) String idempotencyKey,
             @Valid @RequestBody PaymentRequest request) {
+        CallerIdentity caller = CallerIdentity.of(jwt);
         return Mono.fromCallable(() -> IdempotencyKeyHeader.parse(idempotencyKey))
                 .flatMap(key -> service.authorize(new Authorize(
-                        request.bookingId(), request.amount(), request.currency(), request.paymentToken()), key))
+                        request.bookingId(), request.amount(), request.currency(), request.paymentToken()), key, caller))
                 .map(p -> ResponseEntity.created(URI.create("/payments/" + p.id())).body(PaymentResponse.of(p)));
     }
 
+    /** Staff only: travellers get refunds by cancelling their booking, which drives the saga. */
     @PostMapping("/{paymentId}/refund")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPPORT')")
     public Mono<PaymentResponse> refund(@PathVariable UUID paymentId) {
         return service.refund(paymentId).map(PaymentResponse::of);
     }

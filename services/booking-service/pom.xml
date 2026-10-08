@@ -19,6 +19,15 @@
         </dependency>
         <dependency>
             <groupId>org.presight.ai</groupId>
+            <artifactId>common-security</artifactId>
+        </dependency>
+        <!-- Client credentials: the saga's seat commit is booking-service acting as itself. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.presight.ai</groupId>
             <artifactId>common-kafka</artifactId>
         </dependency>
         <dependency>
@@ -61,6 +70,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.presight.ai</groupId>
+            <artifactId>common-security</artifactId>
+            <type>test-jar</type>
             <scope>test</scope>
         </dependency>
         <dependency>

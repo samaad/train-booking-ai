@@ -10,6 +10,7 @@ import org.presight.ai.common.kafka.Topics;
 import org.presight.ai.common.kafka.events.OtherEvents.TicketIssued;
 import org.presight.ai.common.kafka.events.OtherEvents.TicketVoided;
 import org.presight.ai.common.kafka.outbox.Outbox;
+import org.presight.ai.common.security.CallerIdentity;
 import org.presight.ai.ticketing.render.QrTokens;
 import org.presight.ai.ticketing.render.TicketRenderer;
 import org.presight.ai.ticketing.storage.ObjectStore;
@@ -47,7 +48,7 @@ public class TicketService {
         this.tx = tx;
     }
 
-    public record IssueTicket(UUID bookingId, String pnr, String passengerName, String trainNumber,
+    public record IssueTicket(UUID bookingId, String userId, String pnr, String passengerName, String trainNumber,
                               LocalDate travelDate, String fareClass, String seatNo,
                               String fromStation, String toStation, OffsetDateTime departure) {
     }
@@ -59,7 +60,7 @@ public class TicketService {
     public Mono<Ticket> issue(IssueTicket cmd) {
         String claims = String.join("|", cmd.pnr(), cmd.bookingId().toString(), cmd.trainNumber(),
                 cmd.travelDate().toString(), cmd.seatNo());
-        Ticket draft = new Ticket(UuidV7.generate(), cmd.pnr(), cmd.bookingId(), Status.ISSUED,
+        Ticket draft = new Ticket(UuidV7.generate(), cmd.userId(), cmd.pnr(), cmd.bookingId(), Status.ISSUED,
                 cmd.passengerName(), cmd.trainNumber(), cmd.travelDate(), cmd.fareClass(), cmd.seatNo(),
                 cmd.fromStation(), cmd.toStation(), cmd.departure(), qrTokens.sign(claims), null, null, null);
         return tickets.isCancelled(cmd.bookingId())
@@ -84,21 +85,23 @@ public class TicketService {
                 .as(tx::transactional);
     }
 
-    public Mono<Ticket> find(String pnr) {
+    /** Owner or staff; anyone else gets 404 — a PNR is short and guessable, so no existence oracle. */
+    public Mono<Ticket> find(String pnr, CallerIdentity caller) {
         return tickets.findByPnr(pnr)
+                .filter(t -> caller.mayAccess(t.userId()))
                 .switchIfEmpty(Mono.error(() -> DomainException.notFound("TICKET_NOT_FOUND", "No ticket for PNR " + pnr)));
     }
 
-    public Mono<byte[]> qr(String pnr) {
-        return valid(pnr).flatMap(renderer::qrPng);
+    public Mono<byte[]> qr(String pnr, CallerIdentity caller) {
+        return valid(pnr, caller).flatMap(renderer::qrPng);
     }
 
     /**
      * Get-or-render: served from the object store when cached, otherwise rendered and stored. An
      * object-store outage degrades to rendering on every request rather than failing.
      */
-    public Mono<byte[]> pdf(String pnr) {
-        return valid(pnr).flatMap(ticket -> {
+    public Mono<byte[]> pdf(String pnr, CallerIdentity caller) {
+        return valid(pnr, caller).flatMap(ticket -> {
             String key = "tickets/" + ticket.pnr() + ".pdf";
             Mono<byte[]> cached = ticket.pdfObjectKey() == null ? Mono.empty()
                     : store.get(ticket.pdfObjectKey()).onErrorResume(e -> {
@@ -116,8 +119,8 @@ public class TicketService {
         });
     }
 
-    private Mono<Ticket> valid(String pnr) {
-        return find(pnr).flatMap(t -> t.status() == Status.VOIDED
+    private Mono<Ticket> valid(String pnr, CallerIdentity caller) {
+        return find(pnr, caller).flatMap(t -> t.status() == Status.VOIDED
                 ? Mono.error(DomainException.conflict("TICKET_VOIDED", "Ticket " + pnr + " has been voided"))
                 : Mono.just(t));
     }

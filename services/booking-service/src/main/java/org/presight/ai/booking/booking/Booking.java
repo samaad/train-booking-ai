@@ -8,6 +8,7 @@ import java.util.UUID;
 
 public record Booking(
         UUID id,
+        String userId,
         String pnr,
         UUID holdId,
         Status status,

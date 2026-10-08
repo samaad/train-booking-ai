@@ -12,6 +12,9 @@ spring:
     user: ${DB_USER:profile}
     password: ${DB_PASSWORD:profile}
     locations: classpath:db/migration,classpath:db/outbox
+    # Two independent migration streams (this service's V1.. and the shared outbox V1000): a later V3 sorts
+    # below the applied V1000, so out-of-order application must be allowed. They never touch the same tables.
+    out-of-order: true
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
   security:
@@ -22,6 +25,7 @@ spring:
           # JWK set, and tokens must carry this exact issuer. No discovery call at startup.
           issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/train-booking}
           jwk-set-uri: ${OIDC_JWKS:http://localhost:8180/realms/train-booking/protocol/openid-connect/certs}
+          audiences: train-api
 
 server:
   port: ${PORT:8087}

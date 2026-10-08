@@ -24,11 +24,17 @@ final class DownstreamStub {
     /** Holds whose commit should fail with 409 HOLD_EXPIRED (lapsed before payment arrived). */
     final java.util.Set<UUID> expiredOnCommit = ConcurrentHashMap.newKeySet();
     final java.util.Set<UUID> committed = ConcurrentHashMap.newKeySet();
+    /** Authorization header per call, to prove which identity each call carried. */
+    final java.util.List<String> holdReadAuth = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+    final java.util.List<String> commitAuth = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+    /** Answer the next commit with 401, as if the cached service token had been revoked. */
+    final java.util.concurrent.atomic.AtomicBoolean rejectNextCommit = new java.util.concurrent.atomic.AtomicBoolean();
 
     private final DisposableServer server = HttpServer.create()
             .port(0)
             .route(routes -> routes
                     .get("/holds/{id}", (req, res) -> {
+                        holdReadAuth.add(req.requestHeaders().get("Authorization"));
                         if (inventoryDown) {
                             return res.status(HttpResponseStatus.SERVICE_UNAVAILABLE).send();
                         }
@@ -38,6 +44,10 @@ final class DownstreamStub {
                                 : problem(res, 404, "HOLD_NOT_FOUND", "No hold " + req.param("id"));
                     })
                     .post("/holds/{id}/commit", (req, res) -> {
+                        commitAuth.add(req.requestHeaders().get("Authorization"));
+                        if (rejectNextCommit.compareAndSet(true, false)) {
+                            return res.status(401).send().then();
+                        }
                         UUID id = UUID.fromString(req.param("id"));
                         if (expiredOnCommit.contains(id)) {
                             return problem(res, 409, "HOLD_EXPIRED", "Hold " + id + " has expired");

@@ -19,6 +19,7 @@ import org.presight.ai.common.kafka.events.OtherEvents.TicketIssued;
 import org.presight.ai.common.kafka.events.PaymentEvents.PaymentAuthorized;
 import org.presight.ai.common.kafka.events.PaymentEvents.PaymentFailed;
 import org.presight.ai.common.kafka.outbox.Outbox;
+import org.presight.ai.common.security.ServiceTokens;
 import org.presight.ai.common.web.RemoteCallErrors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,12 +55,15 @@ class BookingSaga {
     private final InventoryClient inventory;
     private final Outbox outbox;
     private final IdempotentHandler handler;
+    private final ServiceTokens serviceTokens;
 
-    BookingSaga(BookingRepository bookings, InventoryClient inventory, Outbox outbox, IdempotentHandler handler) {
+    BookingSaga(BookingRepository bookings, InventoryClient inventory, Outbox outbox, IdempotentHandler handler,
+                ServiceTokens serviceTokens) {
         this.bookings = bookings;
         this.inventory = inventory;
         this.outbox = outbox;
         this.handler = handler;
+        this.serviceTokens = serviceTokens;
     }
 
     @KafkaListener(topics = Topics.PAYMENT_AUTHORIZED)
@@ -91,7 +95,8 @@ class BookingSaga {
                 return cancel(b, SagaState.PAYMENT_PENDING, CancelReason.AMOUNT_MISMATCH,
                         "Authorised " + e.amount() + " " + e.currency() + ", booking is " + b.amount() + " " + b.currency());
             }
-            return inventory.commit(b.holdId())
+            // No user is behind a saga step: booking-service commits the seat as itself (role SERVICE).
+            return serviceTokens.call(auth -> inventory.commit(auth, b.holdId()))
                     .timeout(COMMIT_TIMEOUT)
                     .onErrorMap(RemoteCallErrors.from("inventory"))
                     .then(bookings.advance(b.id(), SagaState.PAYMENT_PENDING, SagaState.SEATS_COMMITTED, Status.CONFIRMED, null)
@@ -110,7 +115,7 @@ class BookingSaga {
     }
 
     private static BookingConfirmed confirmed(Booking b) {
-        return new BookingConfirmed(UuidV7.generate(), b.id(), b.pnr(), b.holdId(), b.trainNumber(), b.travelDate(),
+        return new BookingConfirmed(UuidV7.generate(), b.id(), b.userId(), b.pnr(), b.holdId(), b.trainNumber(), b.travelDate(),
                 b.fareClass(), b.seatNo(), b.fromStation(), b.toStation(), b.departure(), b.passengerName(), Instant.now());
     }
 

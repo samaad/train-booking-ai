@@ -36,6 +36,23 @@ import org.testcontainers.kafka.KafkaContainer;
 @Import(BookingApiTest.Containers.class)
 class BookingSagaTest {
 
+    static final org.presight.ai.common.security.testing.TestIssuer issuer = new org.presight.ai.common.security.testing.TestIssuer();
+    static final String USER_TOKEN = issuer.passenger("user-1");
+
+    @DynamicPropertySource
+    static void oidc(DynamicPropertyRegistry registry) {
+        issuer.register(registry);
+    }
+
+    WebTestClient raw;
+
+    @Autowired
+    void tokens(WebTestClient raw) {
+        this.raw = raw;
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + USER_TOKEN).build();
+    }
+
+
     static final DownstreamStub stub = new DownstreamStub();
     static final LocalDate DATE = LocalDate.now().plusDays(10);
     static final Duration WAIT = Duration.ofSeconds(20);
@@ -54,7 +71,6 @@ class BookingSagaTest {
         }
     }
 
-    @Autowired
     WebTestClient client;
 
     @Autowired
@@ -82,6 +98,7 @@ class BookingSagaTest {
 
         BookingCreated created = events.await(Topics.BOOKING_CREATED, BookingCreated.class, e -> e.bookingId().equals(id), WAIT);
         assertThat(created.amount()).isEqualByComparingTo("142.00");
+        assertThat(created.userId()).isEqualTo("user-1"); // payment and ticketing enforce ownership from this
         assertThat(created.contactEmail()).isEqualTo("aisha@example.com");
         assertThat(booking.get("sagaState")).isEqualTo("PAYMENT_PENDING");
     }
@@ -97,14 +114,36 @@ class BookingSagaTest {
         events.publish(Topics.PAYMENT_AUTHORIZED, authorized);
         events.publish(Topics.PAYMENT_AUTHORIZED, authorized); // at-least-once redelivery
 
-        events.await(Topics.BOOKING_CONFIRMED, BookingConfirmed.class, e -> e.bookingId().equals(id), WAIT);
+        BookingConfirmed confirmed = events.await(Topics.BOOKING_CONFIRMED, BookingConfirmed.class, e -> e.bookingId().equals(id), WAIT);
+        assertThat(confirmed.userId()).isEqualTo("user-1");
         assertThat(stub.committed).contains(holdId);
+        // No user is behind a saga step: the commit carried booking-service's own SERVICE token, not the user's.
+        assertThat(stub.commitAuth).isNotEmpty().allSatisfy(auth -> {
+            assertThat(auth).startsWith("Bearer ").isNotEqualTo("Bearer " + USER_TOKEN);
+            String payload = new String(java.util.Base64.getUrlDecoder().decode(auth.substring(7).split("\\.")[1]));
+            assertThat(payload).contains("\"SERVICE\"").contains("service-account-train-services");
+        });
         assertThat(events.settle(Topics.BOOKING_CONFIRMED, BookingConfirmed.class, Duration.ofSeconds(2)))
                 .filteredOn(e -> e.bookingId().equals(id)).hasSize(1);
         assertState(id, "CONFIRMED", "SEATS_COMMITTED");
 
         events.publish(Topics.TICKET_ISSUED, new TicketIssued(UUID.randomUUID(), UUID.randomUUID(), id, "ABC234", Instant.now()));
         awaitState(id, "TICKETED");
+    }
+
+    @Test
+    void aRevokedServiceTokenIsRenewedOnceAndTheStepStillCompletes() {
+        Map<?, ?> booking = book();
+        UUID id = UUID.fromString((String) booking.get("bookingId"));
+        stub.commitAuth.clear();
+        stub.rejectNextCommit.set(true);
+
+        events.publish(Topics.PAYMENT_AUTHORIZED, new PaymentAuthorized(UUID.randomUUID(), UUID.randomUUID(), id,
+                new BigDecimal("142.00"), "AED", "psp_5", Instant.now()));
+
+        events.await(Topics.BOOKING_CONFIRMED, BookingConfirmed.class, e -> e.bookingId().equals(id), WAIT);
+        assertThat(stub.commitAuth).hasSize(2);
+        assertThat(stub.commitAuth.get(1)).isNotEqualTo(stub.commitAuth.get(0)); // a freshly issued token
     }
 
     @Test

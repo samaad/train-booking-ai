@@ -32,6 +32,22 @@ import org.testcontainers.kafka.KafkaContainer;
 @Import(TicketApiTest.Containers.class)
 class TicketEventsTest {
 
+    static final org.presight.ai.common.security.testing.TestIssuer issuer = new org.presight.ai.common.security.testing.TestIssuer();
+
+    @DynamicPropertySource
+    static void oidc(DynamicPropertyRegistry registry) {
+        issuer.register(registry);
+    }
+
+    WebTestClient raw;
+
+    @Autowired
+    void tokens(WebTestClient raw) {
+        this.raw = raw;
+        this.client = raw.mutate().defaultHeader("Authorization", "Bearer " + issuer.passenger("user-1")).build();
+    }
+
+
     private static final Duration WAIT = Duration.ofSeconds(20);
 
     @DynamicPropertySource
@@ -40,7 +56,7 @@ class TicketEventsTest {
                 () -> "http://" + TicketApiTest.s3.getHost() + ":" + TicketApiTest.s3.getMappedPort(9090));
     }
 
-    @Autowired WebTestClient client;
+    WebTestClient client;
     @Autowired KafkaContainer kafka;
 
     static KafkaTestSupport events;
@@ -91,7 +107,7 @@ class TicketEventsTest {
     }
 
     private static BookingConfirmed confirmed(UUID booking, String pnr) {
-        return new BookingConfirmed(UUID.randomUUID(), booking, pnr, UUID.randomUUID(), "ER101", LocalDate.now().plusDays(5),
+        return new BookingConfirmed(UUID.randomUUID(), booking, "user-1", pnr, UUID.randomUUID(), "ER101", LocalDate.now().plusDays(5),
                 "BUSINESS", "B4", "DXB", "FUJ", OffsetDateTime.now().plusDays(5), "Aisha Khan", Instant.now());
     }
 }

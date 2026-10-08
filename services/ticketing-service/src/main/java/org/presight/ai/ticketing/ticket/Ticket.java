@@ -7,6 +7,7 @@ import java.util.UUID;
 
 public record Ticket(
         UUID id,
+        String userId,
         String pnr,
         UUID bookingId,
         Status status,

@@ -22,14 +22,15 @@ class BookingRepository {
 
     Mono<Booking> insert(Booking b, String idempotencyKey) {
         return db.sql("""
-                        INSERT INTO booking (id, pnr, hold_id, status, train_number, travel_date, fare_class, seat_no,
+                        INSERT INTO booking (id, user_id, pnr, hold_id, status, train_number, travel_date, fare_class, seat_no,
                                              from_station, to_station, departure, arrival, passenger_name, contact_email,
                                              amount, currency, idempotency_key, request_hash)
-                        VALUES (:id, :pnr, :holdId, :status, :train, :date, :fareClass, :seatNo,
+                        VALUES (:id, :userId, :pnr, :holdId, :status, :train, :date, :fareClass, :seatNo,
                                 :from, :to, :departure, :arrival, :passenger, :email,
                                 :amount, :currency, :key, :hash)
                         """)
                 .bind("id", b.id())
+                .bind("userId", b.userId())
                 .bind("pnr", b.pnr())
                 .bind("holdId", b.holdId())
                 .bind("status", b.status().name())
@@ -98,6 +99,7 @@ class BookingRepository {
     private static Booking booking(Readable row) {
         return new Booking(
                 row.get("id", UUID.class),
+                row.get("user_id", String.class),
                 row.get("pnr", String.class),
                 row.get("hold_id", UUID.class),
                 Status.valueOf(row.get("status", String.class)),

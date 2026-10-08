@@ -30,6 +30,11 @@ x-service: &service
 x-service-env: &service-env
   JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
   KAFKA_BOOTSTRAP: kafka:29092
+  # Tokens carry the issuer browsers see (KC_HOSTNAME); keys and service tokens are fetched over the network.
+  OIDC_ISSUER: http://localhost:8180/realms/train-booking
+  OIDC_JWKS: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
+  OIDC_TOKEN_URI: http://keycloak:8080/realms/train-booking/protocol/openid-connect/token
+  TRAIN_SERVICES_SECRET: ${TRAIN_SERVICES_SECRET:-dev-only-train-services-secret}
 
 # Each service reaches its own database by name; per-service credentials come from the
 # service's defaults (role = database name), created by postgres/init/01-databases.sh.
@@ -128,7 +133,7 @@ services:
   # ---------------------------------------------------------------- auth
   keycloak-db:
     image: postgres:18.6-alpine
-    profiles: [auth, full]
+    profiles: [auth, full, services, catalog, inventory, booking, payment, ticketing, notification, profile, assistant]
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
@@ -144,7 +149,7 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.5
-    profiles: [auth, full]
+    profiles: [auth, full, services, catalog, inventory, booking, payment, ticketing, notification, profile, assistant]
     command: ["start-dev", "--import-realm"]
     ports: ["8180:8080"]
     environment:
@@ -155,9 +160,21 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       KC_HEALTH_ENABLED: "true"
+      # One stable issuer (what browsers and tokens see), while services reach Keycloak over the network
+      # as keycloak:8080 for JWKS and client-credentials tokens.
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      TRAIN_SERVICES_SECRET: ${TRAIN_SERVICES_SECRET:-dev-only-train-services-secret}
       JAVA_OPTS_KC_HEAP: "-XX:MaxRAMPercentage=70"
     volumes:
-      - ./keycloak:/opt/keycloak/data/import:ro # realm-export.json lands here in Phase 4
+      - ./keycloak:/opt/keycloak/data/import:ro # realm-export.json, built by keycloak/build-realm.sh
+    healthcheck: # management port; the image has no curl
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200 '"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 20s
     depends_on:
       keycloak-db:
         condition: service_healthy
@@ -325,9 +342,6 @@ services:
     environment:
       <<: [*service-env, *postgres-env]
       PORT: 8087
-      # Keycloak as seen from inside the network; the realm itself arrives in Phase 4.
-      OIDC_ISSUER: http://localhost:8180/realms/train-booking
-      OIDC_JWKS: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
     depends_on:
       kafka: { condition: service_healthy }
       postgres: { condition: service_healthy }
@@ -348,8 +362,6 @@ services:
       CATALOG_URL: http://catalog-service:8081
       INVENTORY_URL: http://inventory-service:8082
       BOOKING_URL: http://booking-service:8083
-      OIDC_ISSUER: http://localhost:8180/realms/train-booking
-      OIDC_JWKS: http://keycloak:8080/realms/train-booking/protocol/openid-connect/certs
     depends_on:
       postgres: { condition: service_healthy }
       mongo: { condition: service_healthy }

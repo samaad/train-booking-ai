@@ -38,6 +38,7 @@ spring:
         jwt:
           issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/train-booking}
           jwk-set-uri: ${OIDC_JWKS:http://localhost:8180/realms/train-booking/protocol/openid-connect/certs}
+          audiences: train-api
   http:
     # Global defaults also apply to the clients Spring AI builds for Ollama, so they must allow a slow
     # model: gemma4 can take many seconds to load and answer. The orchestrator's own per-chunk timeout
@@ -56,6 +57,17 @@ spring:
       booking:
         base-url: ${BOOKING_URL:http://localhost:8083}
         read-timeout: 5s
+
+  cloud:
+    circuitbreaker:
+      # Spring Cloud silently wraps every @HttpExchange client in a circuit breaker by default. That hides the
+      # real error (a 404 surfaces as NoFallbackAvailableException) and counts ordinary 4xx answers as
+      # failures — a user probing other people's booking ids could trip the breaker for everyone.
+      # Resilience here is explicit: the Ollama breaker/bulkhead in OllamaChatOrchestrator.
+      http-services:
+        enabled: false
+      reactive-http-services:
+        enabled: false
 
 server:
   port: ${PORT:8080}

@@ -7,6 +7,7 @@ import java.util.UUID;
 /**
  * @param status       effective status — {@code EXPIRED} is derived by the database clock
  * @param requestHash  fingerprint of the request that created the hold, for idempotent replay
+ * @param userId       owner (JWT subject); null only for holds created before Phase 4
  */
 public record Hold(
         UUID id,
@@ -16,7 +17,8 @@ public record Hold(
         String seatNo,
         HoldStatus status,
         Instant expiresAt,
-        String requestHash) {
+        String requestHash,
+        String userId) {
 
     public enum HoldStatus { ACTIVE, EXPIRED, RELEASED, COMMITTED }
 }

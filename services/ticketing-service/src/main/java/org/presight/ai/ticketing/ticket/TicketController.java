@@ -4,7 +4,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import org.presight.ai.ticketing.ticket.Ticket.Status;
+import org.presight.ai.common.security.CallerIdentity;
 import org.springframework.http.CacheControl;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -38,21 +42,24 @@ public class TicketController {
     }
 
     @GetMapping
-    public Mono<TicketResponse> ticket(@PathVariable String pnr) {
-        return service.find(pnr).map(TicketResponse::of);
+    @PreAuthorize("hasAuthority('SCOPE_booking:read')")
+    public Mono<TicketResponse> ticket(@AuthenticationPrincipal Jwt jwt, @PathVariable String pnr) {
+        return service.find(pnr, CallerIdentity.of(jwt)).map(TicketResponse::of);
     }
 
     @GetMapping(value = "/qr", produces = MediaType.IMAGE_PNG_VALUE)
-    public Mono<ResponseEntity<byte[]>> qr(@PathVariable String pnr) {
-        return service.qr(pnr).map(png -> ResponseEntity.ok()
+    @PreAuthorize("hasAuthority('SCOPE_booking:read')")
+    public Mono<ResponseEntity<byte[]>> qr(@AuthenticationPrincipal Jwt jwt, @PathVariable String pnr) {
+        return service.qr(pnr, CallerIdentity.of(jwt)).map(png -> ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore()) // a voided ticket's QR must not linger in caches
                 .contentType(MediaType.IMAGE_PNG)
                 .body(png));
     }
 
     @GetMapping(value = "/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
-    public Mono<ResponseEntity<byte[]>> pdf(@PathVariable String pnr) {
-        return service.pdf(pnr).map(pdf -> ResponseEntity.ok()
+    @PreAuthorize("hasAuthority('SCOPE_booking:read')")
+    public Mono<ResponseEntity<byte[]>> pdf(@AuthenticationPrincipal Jwt jwt, @PathVariable String pnr) {
+        return service.pdf(pnr, CallerIdentity.of(jwt)).map(pdf -> ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.inline().filename("ticket-" + pnr + ".pdf").build().toString())

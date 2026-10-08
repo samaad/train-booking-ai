@@ -26,6 +26,12 @@ import reactor.core.publisher.Mono;
  */
 abstract class ConcurrentHoldContract {
 
+    @org.springframework.test.context.DynamicPropertySource
+    static void oidc(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        Tokens.ISSUER.register(registry);
+    }
+
+
     private static final int RACERS = 24;
     private static final LocalDate DATE = LocalDate.now(ZoneId.of("Asia/Dubai")).plusDays(14);
 
@@ -39,7 +45,8 @@ abstract class ConcurrentHoldContract {
 
     @BeforeEach
     void setUp() {
-        http = WebClient.create("http://localhost:" + port);
+        http = WebClient.builder().baseUrl("http://localhost:" + port)
+                .defaultHeader("Authorization", "Bearer " + Tokens.PASSENGER).build();
         // Reset rather than delete: seat rows are never deleted in production, and SeatLayout
         // remembers which train-dates it has already materialised.
         db.sql("DELETE FROM seat_hold").then()
