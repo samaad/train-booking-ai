@@ -11,6 +11,7 @@ import org.presight.ai.booking.booking.Booking.SagaState;
 import org.presight.ai.booking.booking.Booking.Status;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Repository
@@ -56,6 +57,12 @@ class BookingRepository {
 
     Mono<Booking> findById(UUID id) {
         return db.sql("SELECT * FROM booking WHERE id = :id").bind("id", id).map(BookingRepository::booking).one();
+    }
+
+    /** Newest first. Scoped by owner in SQL, so another user's bookings are never even read. */
+    Flux<Booking> findByOwner(String userId, int limit) {
+        return db.sql("SELECT * FROM booking WHERE user_id = :userId ORDER BY created_at DESC LIMIT :limit")
+                .bind("userId", userId).bind("limit", limit).map(BookingRepository::booking).all();
     }
 
     Mono<Booking> findByIdempotencyKey(String key) {

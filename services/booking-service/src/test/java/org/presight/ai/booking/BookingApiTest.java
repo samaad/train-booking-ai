@@ -191,6 +191,17 @@ public class BookingApiTest {
     }
 
     @Test
+    void listsOnlyTheCallersOwnBookings() {
+        String id = idOf(as(issuer.passenger("lister-1")).post().uri("/bookings").header("Idempotency-Key", key())
+                .bodyValue(body(activeHold("B12"), "Lister")).exchange().expectStatus().isCreated());
+
+        as(issuer.passenger("lister-1")).get().uri("/bookings").exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.length()").isEqualTo(1).jsonPath("$[0].bookingId").isEqualTo(id);
+        as(issuer.passenger("lister-2")).get().uri("/bookings").exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.length()").isEqualTo(0);
+    }
+
+    @Test
     void tokensAndScopesAreRequired() {
         raw.post().uri("/bookings").header("Idempotency-Key", key()).bodyValue(body(UUID.randomUUID(), "A")).exchange()
                 .expectStatus().isUnauthorized();

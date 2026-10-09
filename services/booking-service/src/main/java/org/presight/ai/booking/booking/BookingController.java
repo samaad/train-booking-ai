@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @RestController
@@ -77,6 +78,12 @@ public class BookingController {
                 .flatMap(key -> service.create(new CreateBooking(request.holdId(), request.fromStation(),
                         request.toStation(), request.passengerName(), request.contactEmail()), key, caller))
                 .map(b -> ResponseEntity.created(URI.create("/bookings/" + b.id())).body(BookingResponse.of(b)));
+    }
+
+    @GetMapping
+    @PreAuthorize("hasAuthority('SCOPE_booking:read')")
+    public Flux<BookingResponse> mine(@AuthenticationPrincipal Jwt jwt) {
+        return service.mine(CallerIdentity.of(jwt), 50).map(BookingResponse::of);
     }
 
     @GetMapping("/{bookingId}")

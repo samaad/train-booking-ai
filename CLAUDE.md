@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** Phases 0–7 built (K8s charts authoring-only). Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Phase 6 (Kafka Streams seat availability, OTel tracing to Tempo across the AI seam and Kafka, custom metrics, Grafana dashboards, ECS logs) verified in compose. Not yet: React/mobile frontends, `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** Phases 0–7 built (K8s charts authoring-only). Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Phase 6 (Kafka Streams seat availability, OTel tracing to Tempo across the AI seam and Kafka, custom metrics, Grafana dashboards, ECS logs) verified in compose. React web client in `frontend/web`. Not yet: mobile, `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -132,6 +132,14 @@ Consequences that must hold in code:
 ### Inter-service calls
 
 - **Use `@HttpExchange` interface clients over `WebClient`**, registered via `@ImportHttpServices`. **Do not add `spring-cloud-starter-openfeign`** to any reactive service — Feign is blocking and Spring Cloud has declared it feature-complete. Feign is acceptable *only* in a future non-reactive batch/admin service.
+
+### Web frontend (frontend/web) — conventions
+
+- React 19 + Vite + TS, `oidc-client-ts` (PKCE, public client `train-web`, tokens in sessionStorage), TanStack Query, react-router. Lint is **oxlint**, tests **vitest**. Dev server must stay on **5173** (`strictPort`): Keycloak redirect URIs, Kong CORS and the seat-map WebSocket origin all pin it.
+- All calls go through Kong (`VITE_API_BASE`, default `http://localhost:8000`); compose needs `--profile gateway` for Kong. The SPA requests the optional scopes (`booking:*`, `payment:write`, `profile:*`, `ai:chat`) explicitly — without them every service 403s.
+- Idempotency keys are per *intent* in sessionStorage (`lib/idempotency.ts`) and reused on retry; mutations never auto-retry. The payment key is kept even after success so a reload replays rather than double-charges.
+- `/chat` is POST + bearer, so SSE is parsed from `fetch` (`api/sse.ts`), not `EventSource`. Confirmation cards may only call the two whitelisted booking endpoints (`lib/confirmation.ts`); `CONFIRM_BOOKING` details lack passenger name/email — the card fills them from the profile.
+- "My trips" uses `GET /bookings` (booking-service, caller's own, newest 50).
 
 ## Local environment
 

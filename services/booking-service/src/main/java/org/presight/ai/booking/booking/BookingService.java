@@ -26,6 +26,7 @@ import org.presight.ai.common.web.RemoteCallErrors;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -68,6 +69,11 @@ public class BookingService {
                 .map(existing -> replay(existing, fingerprint))
                 .switchIfEmpty(Mono.defer(() -> price(cmd, caller)
                         .flatMap(draft -> insert(draft, cmd, key, fingerprint, caller.userId()))));
+    }
+
+    /** The caller's own bookings, newest first — staff included: this is "my trips", not a search. */
+    public Flux<Booking> mine(CallerIdentity caller, int limit) {
+        return bookings.findByOwner(caller.userId(), limit);
     }
 
     /** Owner or staff; anyone else gets 404 — a booking id is not an existence oracle. */
