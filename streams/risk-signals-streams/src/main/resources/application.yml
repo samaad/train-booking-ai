@@ -1,0 +1,42 @@
+spring:
+  config:
+    import: classpath:train-booking-observability.yml
+  application:
+    name: risk-signals-streams
+  threads:
+    virtual:
+      enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    streams:
+      application-id: risk-signals-streams
+      state-dir: ${STREAMS_STATE_DIR:${java.io.tmpdir}/risk-signals-streams}
+      properties:
+        # Session store changelog, risk.signal output and consumed offsets commit atomically.
+        processing.guarantee: exactly_once_v2
+        commit.interval.ms: 500
+
+risk:
+  squatting:
+    hold-threshold: ${RISK_HOLD_THRESHOLD:8}
+    max-conversion: 0.25
+    session-gap: 15m
+    # Events up to a minute late (outbox relay lag, rebalances) still join their session.
+    grace: 1m
+
+server:
+  port: ${PORT:8091}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

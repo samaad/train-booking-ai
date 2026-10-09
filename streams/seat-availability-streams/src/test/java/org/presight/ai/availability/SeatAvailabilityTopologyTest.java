@@ -64,7 +64,7 @@ class SeatAvailabilityTopologyTest {
     @Test
     void holdThenCommitIsCommitted() {
         UUID hold = UUID.randomUUID();
-        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B4", T0.plusSeconds(600), T0)));
+        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B4", T0.plusSeconds(600), T0, "user-1")));
         committed.pipeInput(KEY, json(new SeatCommitted(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B4", T0.plusSeconds(5))));
 
         assertThat(seat("B4").status()).isEqualTo(Status.COMMITTED);
@@ -75,7 +75,7 @@ class SeatAvailabilityTopologyTest {
     @Test
     void aReleaseFreesTheSeat() {
         UUID hold = UUID.randomUUID();
-        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B5", T0.plusSeconds(600), T0)));
+        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B5", T0.plusSeconds(600), T0, "user-1")));
         released.pipeInput(KEY, json(new SeatReleased(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B5", ReleaseReason.RELEASED, T0.plusSeconds(3))));
 
         assertThat(seat("B5").status()).isEqualTo(Status.FREE);
@@ -86,7 +86,7 @@ class SeatAvailabilityTopologyTest {
         UUID hold = UUID.randomUUID();
         // Different topics: the release (t+3) is processed before the hold (t+0).
         released.pipeInput(KEY, json(new SeatReleased(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B6", ReleaseReason.EXPIRED, T0.plusSeconds(3))));
-        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B6", T0.plusSeconds(600), T0)));
+        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), hold, "ER101", DATE, "BUSINESS", "B6", T0.plusSeconds(600), T0, "user-1")));
 
         assertThat(seat("B6").status()).isEqualTo(Status.FREE);
     }
@@ -95,8 +95,8 @@ class SeatAvailabilityTopologyTest {
     void releasingAnOlderHoldDoesNotFreeASeatANewerHoldOwns() {
         UUID oldHold = UUID.randomUUID();
         UUID newHold = UUID.randomUUID();
-        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), oldHold, "ER101", DATE, "BUSINESS", "B7", T0.plusSeconds(60), T0)));
-        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), newHold, "ER101", DATE, "BUSINESS", "B7", T0.plusSeconds(900), T0.plusSeconds(120))));
+        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), oldHold, "ER101", DATE, "BUSINESS", "B7", T0.plusSeconds(60), T0, "user-1")));
+        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), newHold, "ER101", DATE, "BUSINESS", "B7", T0.plusSeconds(900), T0.plusSeconds(120), "user-1")));
         released.pipeInput(KEY, json(new SeatReleased(UUID.randomUUID(), oldHold, "ER101", DATE, "BUSINESS", "B7", ReleaseReason.RELEASED, T0.plusSeconds(130))));
 
         assertThat(seat("B7").status()).isEqualTo(Status.HELD);
@@ -105,8 +105,8 @@ class SeatAvailabilityTopologyTest {
 
     @Test
     void aLapsedHoldCountsAsFreeBeforeTheSweeperSaysSo() {
-        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), UUID.randomUUID(), "ER101", DATE, "ECONOMY", "E1", T0.plusSeconds(60), T0)));
-        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), UUID.randomUUID(), "ER101", DATE, "ECONOMY", "E2", T0.plusSeconds(6000), T0)));
+        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), UUID.randomUUID(), "ER101", DATE, "ECONOMY", "E1", T0.plusSeconds(60), T0, "user-1")));
+        held.pipeInput(KEY, json(new SeatHeld(UUID.randomUUID(), UUID.randomUUID(), "ER101", DATE, "ECONOMY", "E2", T0.plusSeconds(6000), T0, "user-1")));
 
         var occupancy = SeatAvailabilityApplication.AvailabilityQuery.summarise(store().get(KEY), T0.plusSeconds(120));
         assertThat(occupancy.seats()).containsOnlyKeys("E2");

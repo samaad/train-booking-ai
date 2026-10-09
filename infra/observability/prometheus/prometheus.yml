@@ -15,3 +15,5 @@ scrape_configs:
           - host.docker.internal:8087 # user-profile-service
           - host.docker.internal:8080 # ai-assistant-service
           - host.docker.internal:8089 # seat-availability-streams
+          - host.docker.internal:8091 # risk-signals-streams
+          - host.docker.internal:8092 # batch-admin-service

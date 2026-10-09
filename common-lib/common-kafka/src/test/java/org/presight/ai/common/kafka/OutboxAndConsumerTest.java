@@ -85,7 +85,7 @@ class OutboxAndConsumerTest {
     @BeforeEach
     void setUp() throws Exception {
         if (!schema) {
-            for (String migration : List.of("V1000__outbox_and_processed_events.sql", "V1001__outbox_headers.sql")) {
+            for (String migration : List.of("V1000__outbox_and_processed_events.sql", "V1001__outbox_headers.sql", "V1002__outbox_traceparent.sql")) {
                 String ddl = new ClassPathResource("db/outbox/" + migration).getContentAsString(StandardCharsets.UTF_8);
                 for (String statement : ddl.replaceAll("(?m)^--.*$", "").split(";")) {
                     if (!statement.isBlank()) {

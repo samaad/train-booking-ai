@@ -1,0 +1,40 @@
+spring:
+  config:
+    import: classpath:train-booking-observability.yml
+  application:
+    name: batch-admin-service
+  threads:
+    virtual:
+      enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/train-booking}
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8180/realms/train-booking/protocol/openid-connect/certs}
+          audiences: train-api
+
+dlt:
+  # Kafka consumer group whose committed offsets mark what bulk replay has already re-published.
+  replay-group: batch-admin-dlt-replay
+  # A message replayed this many times and dead-lettered again is a bug to fix, not a message to retry.
+  max-replays: 3
+
+server:
+  port: ${PORT:8092}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

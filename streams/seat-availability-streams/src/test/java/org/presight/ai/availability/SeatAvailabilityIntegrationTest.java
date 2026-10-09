@@ -70,7 +70,7 @@ class SeatAvailabilityIntegrationTest {
         UUID hold = UUID.randomUUID();
         try (KafkaTestSupport events = new KafkaTestSupport(kafka.getBootstrapServers(), List.of())) {
             events.publish(Topics.SEAT_HELD, new SeatHeld(UUID.randomUUID(), hold, "ER202", DATE, "BUSINESS", "B3",
-                    Instant.now().plusSeconds(600), Instant.now()));
+                    Instant.now().plusSeconds(600), Instant.now(), "user-1"));
             events.publish(Topics.SEAT_COMMITTED, new SeatCommitted(UUID.randomUUID(), hold, "ER202", DATE, "BUSINESS", "B3",
                     Instant.now().plusSeconds(1)));
         }

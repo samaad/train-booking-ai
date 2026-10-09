@@ -1,5 +1,8 @@
 package org.presight.ai.common.kafka.outbox;
 
+import io.r2dbc.spi.Parameters;
+import io.r2dbc.spi.R2dbcType;
+import java.util.Map;
 import org.presight.ai.common.kafka.events.Event;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Mono;
@@ -24,16 +27,21 @@ public class Outbox {
 
     public Mono<Void> append(String topic, Event event) {
         // fromCallable runs with the caller's trace context restored (automatic context propagation).
-        return Mono.fromCallable(() -> new String[] {json.writeValueAsString(event), json.writeValueAsString(traces.capture())})
+        return Mono.fromCallable(() -> {
+                    Map<String, String> trace = traces.capture();
+                    return new String[] {json.writeValueAsString(event), json.writeValueAsString(trace), trace.get("traceparent")};
+                })
                 .flatMap(values -> db.sql("""
-                                INSERT INTO outbox (id, topic, message_key, payload, headers)
-                                VALUES (:id, :topic, :key, CAST(:payload AS jsonb), CAST(:headers AS jsonb))
+                                INSERT INTO outbox (id, topic, message_key, payload, headers, traceparent)
+                                VALUES (:id, :topic, :key, CAST(:payload AS jsonb), CAST(:headers AS jsonb), :traceparent)
                                 """)
                         .bind("id", event.eventId())
                         .bind("topic", topic)
                         .bind("key", String.valueOf(event.key()))
                         .bind("payload", values[0])
                         .bind("headers", values[1])
+                        // Debezium (outbox.mode=cdc) lifts this column into the Kafka traceparent header.
+                        .bind("traceparent", Parameters.in(R2dbcType.VARCHAR, values[2]))
                         .then());
     }
 }

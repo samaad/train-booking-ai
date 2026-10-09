@@ -15,6 +15,7 @@
 
     <modules>
         <module>seat-availability-streams</module>
+        <module>risk-signals-streams</module>
     </modules>
 
     <build>

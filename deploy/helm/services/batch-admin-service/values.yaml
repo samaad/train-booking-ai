@@ -1,0 +1,53 @@
+# batch-admin-service — values only; templates live in the common library chart.
+
+image:
+  repository: train-booking/batch-admin-service
+  tag: ""          # defaults to global.image.tag, then appVersion
+
+port: 8092
+replicas: 1
+
+# Shared settings this service reads from global (oidc, serviceTokens, postgres, mongo, redis, kafka).
+uses: [oidc, kafka]
+
+env: {}
+
+# No secrets.
+secretEnv: {}
+
+javaOpts: "-XX:MaxRAMPercentage=75"
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    memory: "768Mi"
+
+# Single instance: bulk replay of one DLT is serialised in-process.
+hpa:
+  enabled: false
+
+pdb:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+probes:
+  startupFailureThreshold: 36   # 3 minutes
+
+terminationGracePeriodSeconds: 45
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+writableDirs: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+nameOverride: ""
+global: {}

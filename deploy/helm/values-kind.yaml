@@ -32,5 +32,10 @@ ticketing-service: *one
 notification-service: *one
 user-profile-service: *one
 ai-assistant-service: *one
+batch-admin-service:
+  serviceMonitor: { enabled: false }
+risk-signals-streams:
+  replicas: 1
+  serviceMonitor: { enabled: false }
 seat-availability-streams:
   serviceMonitor: { enabled: false }

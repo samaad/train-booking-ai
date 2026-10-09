@@ -66,3 +66,7 @@ ai-assistant-service:
   enabled: true
 seat-availability-streams:
   enabled: true
+batch-admin-service:
+  enabled: true
+risk-signals-streams:
+  enabled: true

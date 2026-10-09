@@ -22,6 +22,7 @@
         <module>ticketing-service</module>
         <module>notification-service</module>
         <module>ai-assistant-service</module>
+        <module>batch-admin-service</module>
     </modules>
 
     <build>

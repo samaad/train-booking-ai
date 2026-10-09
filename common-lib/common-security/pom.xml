@@ -32,6 +32,12 @@
             <artifactId>spring-boot-starter-oauth2-client</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Only for ServletResourceServerSecurity (batch-admin-service); the reactive services never load it. -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

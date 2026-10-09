@@ -1,0 +1,10 @@
+apiVersion: v2
+name: risk-signals-streams
+description: Kafka Streams fraud / velocity signals (session windows per user) → risk.signal.v1.
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"
+dependencies:
+  - name: common
+    version: 0.1.0
+    repository: file://../../common

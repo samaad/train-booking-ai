@@ -161,7 +161,7 @@ public class HoldService {
         Mono<Hold> attempt = seat
                 .flatMap(s -> holds.insertHold(holdId, cmd.trainNumber(), cmd.travelDate(), s, key.value(), fingerprint, cmd.userId()))
                 .flatMap(h -> outbox.append(Topics.SEAT_HELD, new SeatHeld(UuidV7.generate(), h.id(), h.trainNumber(),
-                        h.travelDate(), h.fareClass(), h.seatNo(), h.expiresAt(), Instant.now())).thenReturn(h))
+                        h.travelDate(), h.fareClass(), h.seatNo(), h.expiresAt(), Instant.now(), h.userId())).thenReturn(h))
                 .as(tx::transactional)
                 .doOnNext(h -> {
                     meters.counter("booking.funnel", "stage", "hold").increment();

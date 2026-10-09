@@ -7,6 +7,7 @@ import io.micrometer.tracing.propagation.Propagator;
 import java.time.Duration;
 import org.presight.ai.common.kafka.consumer.IdempotentHandler;
 import org.presight.ai.common.kafka.outbox.Outbox;
+import org.presight.ai.common.kafka.outbox.OutboxJanitor;
 import org.presight.ai.common.kafka.outbox.OutboxRelay;
 import org.presight.ai.common.kafka.outbox.TraceContext;
 import org.springframework.beans.factory.ObjectProvider;
@@ -48,7 +49,9 @@ public class OutboxAutoConfiguration {
         return new Outbox(db, json, traces);
     }
 
+    /** {@code outbox.mode=polling} (default): this service publishes its own outbox. */
     @Bean
+    @ConditionalOnProperty(name = "outbox.mode", havingValue = "polling", matchIfMissing = true)
     @ConditionalOnProperty(name = "outbox.relay.enabled", havingValue = "true", matchIfMissing = true)
     OutboxRelay outboxRelay(DatabaseClient db, ReactiveTransactionManager txManager, KafkaTemplate<String, String> kafka,
                             @Value("${outbox.relay.interval:200ms}") Duration interval,
@@ -60,6 +63,19 @@ public class OutboxAutoConfiguration {
                 .baseUnit("seconds")
                 .register(registry));
         return relay;
+    }
+
+    /**
+     * {@code outbox.mode=cdc}: Debezium reads inserts from the WAL and publishes them (infra/debezium); the relay
+     * is off and rows are only deleted once they are old. Deleting is safe at any age — the replication slot
+     * keeps the WAL until Debezium has read it — the retention is only for operators looking at recent events.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "outbox.mode", havingValue = "cdc")
+    OutboxJanitor outboxJanitor(DatabaseClient db,
+                                @Value("${outbox.cdc.retention:1h}") Duration retention,
+                                @Value("${outbox.cdc.cleanup-interval:1m}") Duration interval) {
+        return new OutboxJanitor(db, retention, interval);
     }
 
     @Bean

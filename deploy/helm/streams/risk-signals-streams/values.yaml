@@ -1,0 +1,60 @@
+# risk-signals-streams — values only; templates live in the common library chart.
+
+image:
+  repository: train-booking/risk-signals-streams
+  tag: ""          # defaults to global.image.tag, then appVersion
+
+port: 8091
+replicas: 2
+component: streams
+
+# Shared settings this service reads from global (oidc, serviceTokens, postgres, mongo, redis, kafka).
+uses: [kafka]
+
+env:
+  STREAMS_STATE_DIR: "/var/lib/kafka-streams"
+  RISK_HOLD_THRESHOLD: "8"
+
+# No secrets.
+secretEnv: {}
+
+javaOpts: "-XX:MaxRAMPercentage=75"
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    memory: "1Gi"
+
+hpa:
+  enabled: false
+
+pdb:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+probes:
+  startupFailureThreshold: 36   # 3 minutes
+
+terminationGracePeriodSeconds: 45
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+nameOverride: ""
+global: {}
+# No interactive queries, so instances simply split partitions (up to risk topics' 6). Session stores
+# rebuild from their changelog on rebalance; RollingUpdate is fine.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+writableDirs:
+  - name: state
+    mountPath: /var/lib/kafka-streams
+    sizeLimit: 2Gi
+

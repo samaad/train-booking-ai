@@ -28,6 +28,8 @@ public final class Topics {
     public static final String PROFILE_UPDATED = "profile.updated.v1";
     public static final String NOTIFICATION_SENT = "notification.sent.v1";
     public static final String CATALOG_UPDATED = "catalog.updated.v1";
+    /** risk-signals-streams output: per-user fraud / velocity signals, keyed by userId. */
+    public static final String RISK_SIGNAL = "risk.signal.v1";
 
     /** @param retention {@code null} means log-compacted */
     public record TopicSpec(String name, int partitions, Duration retention) {
@@ -48,7 +50,8 @@ public final class Topics {
             spec(TICKET_VOIDED, 12, Duration.ofDays(90)),
             spec(PROFILE_UPDATED, 6, Duration.ofDays(7)),
             spec(NOTIFICATION_SENT, 6, Duration.ofDays(1)),
-            Map.entry(CATALOG_UPDATED, new TopicSpec(CATALOG_UPDATED, 6, null)));
+            Map.entry(CATALOG_UPDATED, new TopicSpec(CATALOG_UPDATED, 6, null)),
+            spec(RISK_SIGNAL, 6, Duration.ofDays(30)));
 
     private Topics() {
     }

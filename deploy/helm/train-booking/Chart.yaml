@@ -40,6 +40,14 @@ dependencies:
     version: 0.1.0
     repository: file://../services/ai-assistant-service
     condition: ai-assistant-service.enabled
+  - name: batch-admin-service
+    version: 0.1.0
+    repository: file://../services/batch-admin-service
+    condition: batch-admin-service.enabled
+  - name: risk-signals-streams
+    version: 0.1.0
+    repository: file://../streams/risk-signals-streams
+    condition: risk-signals-streams.enabled
   - name: seat-availability-streams
     version: 0.1.0
     repository: file://../streams/seat-availability-streams

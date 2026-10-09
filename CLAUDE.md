@@ -2,7 +2,7 @@
 
 AI-driven train booking system: reactive Spring microservices with a **local** Ollama model (`gemma4`) that books real trains by calling real services.
 
-**Status:** Phases 0–6 built; Phase 7 Helm charts authored (hardening items not yet). Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Phase 6 (Kafka Streams seat availability, OTel tracing to Tempo across the AI seam and Kafka, custom metrics, Grafana dashboards, ECS logs) verified in compose. Not yet: React/mobile frontends, Phase 7 hardening (seat-contention load test, DLT replay tooling, fraud/velocity topology, Debezium CDC, batch-admin-service), `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
+**Status:** Phases 0–7 built (K8s charts authoring-only). Events (Phase 3) and security (Phase 4: Keycloak realm, PKCE clients, JWT resource server + ownership in every service, service-to-service client credentials, Kong CORS/limits/header stripping) are verified end to end in compose. Phase 6 (Kafka Streams seat availability, OTel tracing to Tempo across the AI seam and Kafka, custom metrics, Grafana dashboards, ECS logs) verified in compose. Not yet: React/mobile frontends, `catalog.updated` producer, `ai.toolcall.v1`. Full plan in [`.claude/plan/`](.claude/plan/README.md); roadmap in [09-roadmap.md](.claude/plan/09-roadmap.md).
 
 ## Stack
 
@@ -63,6 +63,14 @@ These were verified against Maven Central and bytecode, and are costly to redisc
 - Logs are ECS JSON (`LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs`). Trace ids are flat top-level `traceId`/`spanId` keys.
 - `seat-availability-streams` (`streams/`, servlet + virtual threads, `exactly_once_v2`) must declare its **source** topics as `NewTopic`s too, or startup dies with `MissingSourceTopicException`. Its output is the compacted `seat.availability.v1`, plus `GET /occupancy/{train}/{date}` and the WebSocket `/ws/seat-map`.
 - AI `PriceGuard` only trusts money-named JSON fields (`amount|price|fare|total|cost`): digits inside UUIDs or dates must never vouch for a quoted price.
+
+### Hardening (Phase 7) — conventions
+
+- **Seat contention:** `load-tests/seat-contention/run.py [--without-redis]` (k6 in Docker + Postgres invariant checks). Exactly one winner per seat with Redis up *or down*; keep it that way. Tooling logs in via PKCE (`load-tests/lib/keycloak.py`) — the realm deliberately has no password-grant client; don't add one.
+- **DLT replay:** `batch-admin-service` (port 8092, ADMIN only, not behind Kong) — the one servlet service; security via `ServletResourceServerSecurity` with common-security's webflux starter excluded. Replays go to the *original* topic (all groups see them; idempotency makes that safe), keep key + `eventId`, drop `kafka_dlt-*` and stale trace headers (`x-original-traceparent` keeps the link), and stop at `x-replay-count` 3. Bulk replay position = committed offsets of group `batch-admin-dlt-replay`. A consumer with no group: `createConsumer(null, …)` — `""` is rejected. No OpenFeign: nothing here needed it.
+- **Risk signals:** `risk-signals-streams` (port 8091) — session windows per user over `seat.held` + `booking.created` → `risk.signal.v1` (advisory, nobody consumes it yet). `SeatHeld` carries `userId` for this. Signals emit as the session grows (no `suppress`); signal ids are deterministic so recomputation dedupes.
+- **CDC:** `outbox.mode=cdc` (env `OUTBOX_MODE`) turns the polling relay off and an `OutboxJanitor` on; Debezium (`--profile cdc`, Connect on host 8093, `infra/debezium/register.sh`) routes rows with the outbox EventRouter. Kafka headers come from *columns* only — that is why `outbox.traceparent` exists. Postgres runs `wal_level=logical`. Start connectors before switching services to cdc (overlap = harmless duplicates).
+- New compose profiles `risk`, `admin`, `cdc` are not part of `services` (8 GB Docker cap).
 
 ### Kubernetes (deploy/helm) — conventions
 
@@ -141,7 +149,7 @@ Consequences that must hold in code:
 
 - Layout: `common-lib/*` (plain jars), `services/*` (bootable), `streams/*` (Kafka Streams apps, blocking, isolated), `deploy/helm/` (charts), `infra/` (compose, init scripts, Kong, Prometheus/Grafana).
 - AI service: `POST /chat` (SSE events: conversation, token, tool, confirmation, warning, fallback, error, done), `GET /conversations`, `GET /conversations/{id}/messages`; Kong `/api/assistant`. Compose profile `assistant`.
-- Ports: catalog 8081, inventory 8082, booking 8083, payment 8084, ticketing 8085, notification 8086, user-profile 8087, seat-availability-streams 8089, ai-assistant 8080. Prometheus 9090, Grafana 3000, Tempo 3200. Kong proxy 8000, Keycloak 8180, kafka-ui 8090.
+- Ports: catalog 8081, inventory 8082, booking 8083, payment 8084, ticketing 8085, notification 8086, user-profile 8087, seat-availability-streams 8089, risk-signals-streams 8091, batch-admin 8092, ai-assistant 8080. Kafka Connect 8093. Prometheus 9090, Grafana 3000, Tempo 3200. Kong proxy 8000, Keycloak 8180, kafka-ui 8090.
 - `common-core` stays framework-free (ids, `DomainException`, `IdempotencyKey`, `RequestFingerprint`). `common-web` auto-configures RFC 9457 problem+json error mapping — throw `DomainException` with an `UPPER_SNAKE` code rather than building error responses by hand. Use `IdempotencyKeyHeader` for the header and `RemoteCallErrors.from(service)` in `onErrorMap` on every inter-service call.
 - Mutating endpoints take `Idempotency-Key`; store key + `RequestFingerprint` with a UNIQUE constraint; replay returns the original 201, a reused key with a different body is 422. State transitions are single conditional UPDATEs (`WHERE status = … AND version = …`), never read-modify-write.
 - Kong routes: `/api/{catalog,inventory,booking,payment,ticketing,profile,assistant,availability}/…` (prefix stripped). notification has no public API.

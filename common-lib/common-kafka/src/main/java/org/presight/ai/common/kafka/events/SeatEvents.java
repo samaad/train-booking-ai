@@ -11,8 +11,9 @@ public final class SeatEvents {
     private SeatEvents() {
     }
 
+    /** {@code userId} is the holder (JWT subject) — risk-signals-streams watches holds per user for seat-squatting. */
     public record SeatHeld(UUID eventId, UUID holdId, String trainNumber, LocalDate travelDate, String fareClass,
-                           String seatNo, Instant expiresAt, Instant occurredAt) implements Event {
+                           String seatNo, Instant expiresAt, Instant occurredAt, String userId) implements Event {
         public String key() { return Topics.seatKey(trainNumber, travelDate); }
     }
 
